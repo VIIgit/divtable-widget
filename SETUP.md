@@ -90,6 +90,7 @@ divtable-widget/
 ## Ready to Upload! ✅
 
 Your project is now ready to be uploaded to GitHub with:
+
 - ✅ Complete source code
 - ✅ Apache 2.0 License
 - ✅ Comprehensive README
