@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>DivTable Widget Demo</title>
+  <!-- DivTable Widget Component Styles -->
+  <link rel="stylesheet" href="../src/div-table.css">
+  <!-- Demo Page Layout Styles -->
+  <link rel="stylesheet" href="demo.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+</head>
+
+<body>
+  <div class="container">
+    <h1>DivTable Widget Demo</h1>
+    <p>A modern table widget built with CSS Grid and Flexbox - no HTML tables!</p>
+
+    <h2>Table with Checkboxes</h2>
+    <div class="table-layout">
+      <div class="table-section">
+        <div id="divtable1" class="div-table-widget">
+        </div>
+      </div>
+      <div class="details-section">
+        <div id="details1" class="details-panel">
+          <h3>Row Details</h3>
+          <div class="details-content empty">
+            Click on a row to see details here
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Table without Checkboxes</h2>
+    <div class="table-layout">
+      <div class="table-section">
+        <div id="divtable2" class="div-table-widget">
+        </div>
+      </div>
+      <div class="details-section">
+        <div id="details2" class="details-panel">
+          <h3>Row Details</h3>
+          <div class="details-content empty">
+            Click on a row to see details here
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Virtual Scrolling Table (1000+ Records)</h2>
+    <div class="table-layout">
+      <div class="table-section">
+        <div id="divtable3" class="div-table-widget">
+        </div>
+      </div>
+      <div class="details-section">
+        <div id="details3" class="details-panel">
+          <h3>Row Details</h3>
+          <div class="details-content empty">
+            Click on a row to see details here
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../src/query.js"></script>
+  <script src="../src/div-table.js"></script>
+  <script type="module">
+
+    // Function to update details panel
+    function updateDetailsPanel(detailsId, row, group) {
+      const detailsContent = document.querySelector(`#${detailsId} .details-content`);
+
+      if (group) {
+        detailsContent.className = 'details-content';
+        detailsContent.innerHTML = `
+          <div class="detail-item">
+            <span class="detail-label">Group Type:</span>
+            <span class="detail-value">${group.label}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Group Value:</span>
+            <span class="detail-value">${group.value || 'undefined'}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Items in Group:</span>
+            <span class="detail-value">${group.itemCount}</span>
+          </div>
+        `;
+      } else if (row) {
+        detailsContent.className = 'details-content';
+        const items = Object.entries(row)
+          .filter(([key, value]) => value !== undefined && value !== null && value !== '')
+          .map(([key, value]) => `
+            <div class="detail-item">
+              <span class="detail-label">${key.charAt(0).toUpperCase() + key.slice(1)}:</span>
+              <span class="detail-value">${value}</span>
+            </div>
+          `).join('');
+
+        detailsContent.innerHTML = items || '<div class="detail-item">No data available</div>';
+      } else {
+        detailsContent.className = 'details-content empty';
+        detailsContent.innerHTML = 'Click on a row to see details here';
+      }
+    }
+
+    const data = [
+      { id: 1, name: 'John Doe', age: 30, city: 'New York', active: true, technical: 1001 },
+      { id: 2, name: 'Jane Smith', age: 25, city: 'Los Angeles', active: false, technical: 1002 },
+      { id: 3, name: 'Bob Johnson', age: 35, city: 'Chicago', active: true, technical: 1003 },
+      { id: 4, name: 'Alice Brown', age: 28, city: 'New York', active: false, technical: 1004 },
+      { id: 5, name: 'Charlie Wilson', age: 32, city: 'Los Angeles', active: true, technical: 1005 },
+      { id: 6, name: 'Eva Martinez', age: 27, city: 'Chicago', active: true, technical: 1006 },
+      { id: 7, name: 'David Lee', age: 40, city: 'New York', active: false, technical: 1007 },
+      { id: 8, name: 'Grace Taylor', age: 22, city: 'Los Angeles', active: true, technical: 1008 },
+      { id: 9, name: 'Grace Taylor9', age: 2, city: 'Los Angeles', active: true, technical: 1009 },
+      { id: 10, name: 'Grace Taylor10', city: 'Los Angeles', active: true, technical: 1010 },
+      { id: 11, name: 'Grace11 Taylor', age: 22, city: 'Los Angeles', active: true, technical: 1011 },
+      { id: 12, name: 'no age, city, active', technical: 1012 },
+      { id: 13, name: 'Grace Taylor13', age: 22, city: 'Los Angeles', active: true, technical: 1013 }
+    ];
+
+    // Column definitions with responsive metadata
+    const columns = [
+      {
+        field: 'technical',
+        label: 'Technical ID',
+        hidden: true,
+        primaryKey: true
+      },
+      {
+        field: 'id',
+        label: 'ID',
+        responsive: { priority: 'low', size: 'fixed-narrow', hideMobile: true },
+        groupable: false
+      },
+      {
+        field: 'name',
+        label: 'Name',
+        responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
+        groupable: false
+      },
+      {
+        field: 'age',
+        label: 'Age',
+        render: (value) => value ? `${value} years` : '',
+        responsive: { priority: 'medium', size: 'fixed-medium', hideSmall: true },
+        groupable: true
+      },
+      {
+        field: 'city',
+        label: 'City<br>(with link)',
+        render: (value) => value ? `<a href="https://www.example.com?city=${encodeURIComponent(value)}" target="_blank" rel="noopener noreferrer">${value}</a>` : '',
+        responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+        groupable: true
+      },
+      {
+        field: 'active',
+        label: 'Status',
+        render: (value) => {
+          if (value === true) return '✅ Active';
+          if (value === false) return '❌ Inactive';
+          return '';
+        },
+        responsive: { priority: 'high', size: 'flexible-small' },
+        groupable: true
+      }
+    ];
+
+    // Monaco Editor laden und dann ALL DivTables starten
+    require.config({
+      paths: {
+        vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs"
+      }
+    });
+
+    require(["vs/editor/editor.main"], function () {
+      // Initialize ALL tables within the same Monaco require block
+      const divTable1 = document.getElementById('divtable1');
+      const divTable2 = document.getElementById('divtable2');
+      const divTable3 = document.getElementById('divtable3');
+
+      // First DivTable instance with checkboxes
+      const divTableWithCheckboxes = new DivTable(monaco, {
+        tableWidgetElement: divTable1,
+        data: [...data], // Clone data to avoid interference
+        columns,
+        showCheckboxes: true,
+        multiSelect: true,
+        onSelectionChange: (rows) => {
+          console.log("🔍 Hidden technical IDs of selected rows:", rows.map(r => r?.technical).filter(Boolean));
+        },
+        onRowFocus: (row, group) => {
+          if (group) {
+            updateDetailsPanel('details1', null, group);
+          } else if (row) {
+            updateDetailsPanel('details1', row, null);
+          } else {
+            updateDetailsPanel('details1', null, null);
+          }
+        }
+      });
+
+      // Second DivTable instance without checkboxes
+      const divTableWithoutCheckboxes = new DivTable(monaco, {
+        tableWidgetElement: divTable2,
+        data: [...data], // Clone data to avoid interference
+        columns,
+        showCheckboxes: false,
+        multiSelect: true,
+        onSelectionChange: (rows) => {
+          console.log("📋 Table 2 (without checkboxes) - Selected rows:", rows.map(r => r?.name || 'No name').filter(Boolean));
+        },
+        onRowFocus: (row, group) => {
+          if (group) {
+            updateDetailsPanel('details2', null, group);
+          } else if (row) {
+            updateDetailsPanel('details2', row, null);
+          } else {
+            updateDetailsPanel('details2', null, null);
+          }
+        }
+      });
+
+      divTableWithoutCheckboxes.group('city');
+
+      // Function to simulate loading data from server
+      function simulateDataFetch(page, pageSize) {
+        
+        return new Promise((resolve) => {
+          // Simulate network delay
+          setTimeout(() => {
+            const startId = page * pageSize + 1;
+            const newData = [];
+
+            // Generate realistic data for demonstration
+            const cities = ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'Philadelphia', 'San Antonio', 'San Diego', 'Dallas', 'San Jose'];
+            const departments = ['Engineering', 'Marketing', 'Sales', 'Support', 'Finance', 'HR', 'Operations'];
+            const firstNames = ['John', 'Jane', 'Bob', 'Alice', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Henry'];
+            const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
+            const tagsArray = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+
+            for (let i = 0; i < pageSize; i++) {
+              const id = startId + i;
+              const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+              const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+              const city = cities[Math.floor(Math.random() * cities.length)];
+              const department = departments[Math.floor(Math.random() * departments.length)];
+              const age = Math.floor(Math.random() * 40) + 22; // Age between 22-62
+              const active = Math.random() > 0.3; // 70% chance of being active
+              const tags = [tagsArray[Math.floor(Math.random() * tagsArray.length)]];
+              if (!active){
+                tags.push(tagsArray[Math.floor(Math.random() * tagsArray.length)]);
+              };
+              newData.push({
+                id: id,
+                name: `${firstName} ${lastName}`,
+                age: age,
+                city: city,
+                department: department,
+                active: active,
+                tags,
+                technical: 5000 + id // Hidden technical ID starting from 5001
+              });
+            }
+
+            // Stop generating data after 1000 records for demo
+            // Page 0: IDs 1-100, Page 1: IDs 101-200, Page 2: IDs 201-300, etc.
+            // Page 9: IDs 901-1000, Page 10: startId = 1001 should return empty
+            if (startId > 477) {
+              resolve([]); // No more data
+            } else {
+              resolve(newData);
+            }
+          }, 1600 + Math.random() * 700); // Simulate 600-1300ms network delay
+        });
+      }
+
+      // Initialize virtual scrolling table with first 100 records
+      simulateDataFetch(0, 100).then(initialData => {
+        const virtualScrollingTable = new DivTable(monaco, {
+          tableWidgetElement: divTable3,
+          data: null, //initialData,
+          columns: [
+            {
+              field: 'technical',
+              label: 'Technical ID',
+              hidden: true,
+              primaryKey: true
+            },
+            {
+              field: 'id',
+              label: 'ID',
+              type: 'number',
+              responsive: { priority: 'low', size: 'fixed-narrow', hideMobile: true },
+              groupable: false
+            },
+            {
+              field: 'name',
+              label: 'Name',
+              subLabel: 'Age',
+              subField: 'age',
+              subType: 'number',
+              subRender: (value) => value ? `${value} years old` : 'Age not specified',
+              responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
+              groupable: false
+            },
+            {
+              field: 'department',
+              label: 'Department',
+              responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+              groupable: true
+            },
+            {
+              field: 'tags',
+              label: 'Tags',
+              responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+              groupable: true
+            },
+            {
+              field: 'city',
+              label: 'City',
+              render: (value) => value ? `<a href="https://www.example.com?city=${encodeURIComponent(value)}" target="_blank" rel="noopener noreferrer">${value}</a>` : '',
+              responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+              groupable: true,
+              fieldCompositeName: 'locationStatus'
+            },
+            {
+              field: 'active',
+              label: 'Status',
+              type: 'boolean',
+              render: (value) => {
+                if (value === true) return '✅ Active';
+                if (value === false) return '❌ Inactive';
+                return '';
+              },
+              responsive: { priority: 'high', size: 'flexible-small' },
+              groupable: true,
+              fieldCompositeName: 'locationStatus'
+            }
+          ],
+          showCheckboxes: true,
+          multiSelect: true,
+
+          // Virtual scrolling configuration
+          virtualScrolling: true,
+          pageSize: 100,
+          totalRecords: 1000, // Total records available on server
+          loadingThreshold: 20, // Load next page when within 20 records of the end (80% of page size)
+
+          // Refresh functionality
+          showRefreshButton: true,
+          showAutoFetchButton: true,
+          autoFetchDelay: 500, // Auto-fetch every 5 seconds
+
+          // Callbacks
+          onNextPage: async (page, pageSize) => {
+            console.log(`📄 Loading page ${page} (${pageSize} records per page)`);
+            virtualScrollingTable.setTotalRecords(477);
+            return await simulateDataFetch(page, pageSize);
+          },
+
+          onSelectionChange: (rows) => {
+            console.log("📋 Virtual Table - Selected rows:", rows.map(r => r?.name || 'No name').filter(Boolean));
+          },
+
+          onRowFocus: (row, group) => {
+            if (group) {
+              updateDetailsPanel('details3', null, group);
+            } else if (row) {
+              updateDetailsPanel('details3', row, null);
+            } else {
+              updateDetailsPanel('details3', null, null);
+            }
+          }
+        });
+
+        // Optional: Group by department to demonstrate virtual scrolling with grouping
+        setTimeout(() => {
+          virtualScrollingTable.group('department');
+        }, 1000);
+      });
+
+      // API Examples - Initialize query feature like in smart-table:
+      // 1. Apply filter - Enable query functionality
+      divTableWithCheckboxes.applyQuery('city = "Chicago" AND age > 26');
+
+      // 2. Sort
+      //divTableWithCheckboxes.sort('age', 'desc');
+
+      // 3. Group (already applied above)
+      //divTableWithCheckboxes.group('city');
+
+      // 4. Add new row with hidden primary key
+      setTimeout(() => {
+        divTableWithCheckboxes.addRecord({
+          technical: 2001, // Hidden primary key
+          id: 14,
+          name: 'Eva Hidden ✅ Added record',
+          age: 22,
+          city: 'Hamburg',
+          active: false
+        });
+      }, 3000);
+
+      setTimeout(() => {
+        divTableWithCheckboxes.addRecord({
+          technical: 1012, // Hidden primary key
+          id: 12,
+          name: 'Eva Adam ✅ updated record',
+          age: 22,
+          city: 'Hamburg',
+          active: false
+        });
+        console.log('✅ Added record with hidden primary key: technical=2001');
+      }, 3000);
+    });
+  </script>
+</body>
+
+</html>

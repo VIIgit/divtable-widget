@@ -1,0 +1,52 @@
+{
+  "name": "divtable-widget",
+  "version": "1.0.0",
+  "description": "A modern table widget built with CSS Grid and Flexbox, featuring Monaco Editor integration for advanced query capabilities",
+  "main": "dist/divtable.min.js",
+  "module": "src/div-table.js",
+  "types": "dist/divtable.d.ts",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "serve": "npx http-server examples -p 8080 -o"
+  },
+  "keywords": [
+    "table",
+    "widget",
+    "grid",
+    "flexbox",
+    "monaco",
+    "editor",
+    "query",
+    "virtual-scrolling",
+    "pagination",
+    "sorting",
+    "grouping"
+  ],
+  "author": "Your Name",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/divtable-widget.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/divtable-widget/issues"
+  },
+  "homepage": "https://github.com/yourusername/divtable-widget#readme",
+  "peerDependencies": {
+    "monaco-editor": "^0.52.0"
+  },
+  "devDependencies": {
+    "monaco-editor": "^0.52.2",
+    "monaco-editor-webpack-plugin": "^7.1.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "terser-webpack-plugin": "^5.3.10"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
+}
