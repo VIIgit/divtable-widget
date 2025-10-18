@@ -2089,3 +2089,19 @@ function getQueryEditorFieldNames(languageId) {
   const existingSetup = registeredLanguages.get(languageId);
   return existingSetup ? existingSetup.fieldNames : null;
 }
+
+// Export for Node.js/Jest testing
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    setupQueryLanguage,
+    createQueryEditor,
+    updateQueryEditorFieldNames,
+    getQueryEditorFieldNames,
+    setupLanguageConfiguration,
+    setupCompletionProvider,
+    setupTokenProvider,
+    setupValidation,
+    setupEditorTheme,
+    generateUniqueLanguageId
+  };
+}

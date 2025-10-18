@@ -3787,7 +3787,7 @@ class QueryEngine {
       };
     }
 
-    const match = condition.match(/(\w+)\s*(=|!=|>|<)\s*(.+)/i);
+    const match = condition.match(/(\w+)\s*(=|!=|>=|<=|>|<)\s*(.+)/i);
     if (match) {
       const [, field, operator, value] = match;
       let parsedValue = value.trim();
@@ -3845,6 +3845,18 @@ class QueryEngine {
         if (Array.isArray(objValue)) return false;
         return objValue < parseFloat(value);
 
+      case '>=':
+        if (isNullish(objValue)) return false;
+        // Arrays don't support >= comparison
+        if (Array.isArray(objValue)) return false;
+        return objValue >= parseFloat(value);
+
+      case '<=':
+        if (isNullish(objValue)) return false;
+        // Arrays don't support <= comparison
+        if (Array.isArray(objValue)) return false;
+        return objValue <= parseFloat(value);
+
       case 'IN':
         if (value.includes(null)) {
           return isNullish(objValue) || value.includes(objValue);
@@ -3860,4 +3872,9 @@ class QueryEngine {
         return false;
     }
   }
+}
+
+// Export for Node.js/Jest testing
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { DivTable, QueryEngine };
 }
