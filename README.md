@@ -2,6 +2,8 @@
 
 A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML tables, featuring Monaco Editor integration for advanced query capabilities.
 
+![alt](demo.gif)
+
 ## Features
 
 - **Modern CSS-based Layout**: Uses CSS Grid and Flexbox for flexible, responsive design
