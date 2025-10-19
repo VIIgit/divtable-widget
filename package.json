@@ -1,6 +1,6 @@
 {
   "name": "divtable-widget",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A modern table widget built with CSS Grid and Flexbox, featuring Monaco Editor integration for advanced query capabilities",
   "main": "dist/divtable.min.js",
   "module": "src/div-table.js",
