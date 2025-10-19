@@ -3,8 +3,8 @@ node_modules/
 package-lock.json
 yarn.lock
 
-# Build output
-dist/
+# Build output (commented out for NPM publishing)
+# dist/
 *.log
 
 # IDE
