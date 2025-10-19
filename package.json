@@ -11,7 +11,10 @@
     "serve": "npx http-server examples -p 8080 -o",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "prepublishOnly": "npm test && npm run build",
+    "version": "npm run build && git add -A dist",
+    "postversion": "git push && git push --tags"
   },
   "keywords": [
     "table",
@@ -26,16 +29,16 @@
     "sorting",
     "grouping"
   ],
-  "author": "Your Name",
+  "author": "VIIgit",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/divtable-widget.git"
+    "url": "https://github.com/VIIgit/divtable-widget.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/divtable-widget/issues"
+    "url": "https://github.com/VIIgit/divtable-widget/issues"
   },
-  "homepage": "https://github.com/yourusername/divtable-widget#readme",
+  "homepage": "https://github.com/VIIgit/divtable-widget#readme",
   "peerDependencies": {
     "monaco-editor": "^0.52.0"
   },
