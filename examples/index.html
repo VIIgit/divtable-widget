@@ -63,6 +63,17 @@
         </div>
       </div>
     </div>
+
+    <h2>Programmatic Refresh Demo</h2>
+    <div style="margin-bottom: 20px; padding: 15px; background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px;">
+      <p style="margin: 0 0 10px 0;">
+        <strong>Try the public <code>refresh()</code> method:</strong> Click the button below to programmatically trigger a refresh of the virtual scrolling table above.
+      </p>
+      <button id="programmaticRefreshBtn" style="padding: 8px 16px; background: #0ea5e9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
+        🔄 Trigger Refresh Programmatically
+      </button>
+      <div id="refreshStatus" style="margin-top: 10px; font-size: 14px; color: #64748b;"></div>
+    </div>
   </div>
 
   <script src="../src/query.js"></script>
@@ -279,9 +290,12 @@
         });
       }
 
+      // Declare virtualScrollingTable in outer scope so it's accessible for programmatic refresh
+      let virtualScrollingTable;
+
       // Initialize virtual scrolling table with first 100 records
       simulateDataFetch(0, 100).then(initialData => {
-        const virtualScrollingTable = new DivTable(monaco, {
+        virtualScrollingTable = new DivTable(monaco, {
           tableWidgetElement: divTable3,
           data: null, //initialData,
           columns: [
@@ -417,6 +431,50 @@
         });
         console.log('✅ Added record with hidden primary key: technical=2001');
       }, 3000);
+
+      // ============================================================
+      // Programmatic Refresh Demo
+      // ============================================================
+      // Wire up the external button to call the public refresh() API
+      const refreshBtn = document.getElementById('programmaticRefreshBtn');
+      const statusDiv = document.getElementById('refreshStatus');
+
+      refreshBtn.addEventListener('click', async () => {
+        try {
+          // Disable button and show loading state
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = '⏳ Refreshing...';
+          statusDiv.textContent = 'Calling virtualScrollingTable.refresh()...';
+          statusDiv.style.color = '#0ea5e9';
+
+          // Call the public refresh() method on the virtual scrolling table
+          await virtualScrollingTable.refresh();
+
+          // Show success message
+          statusDiv.textContent = '✅ Refresh completed successfully! Virtual table reloaded from page 0.';
+          statusDiv.style.color = '#10b981';
+          console.log('✅ Programmatic refresh completed');
+
+          // Reset button after a delay
+          setTimeout(() => {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = '🔄 Trigger Refresh Programmatically';
+            statusDiv.textContent = '';
+          }, 2000);
+
+        } catch (error) {
+          // Handle errors
+          console.error('❌ Refresh failed:', error);
+          statusDiv.textContent = `❌ Error: ${error.message}`;
+          statusDiv.style.color = '#ef4444';
+
+          // Reset button
+          setTimeout(() => {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = '🔄 Trigger Refresh Programmatically';
+          }, 3000);
+        }
+      });
     });
   </script>
 </body>

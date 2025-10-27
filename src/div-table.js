@@ -2560,79 +2560,14 @@ class DivTable {
       e.preventDefault();
       e.stopPropagation();
       
-      // Stop auto-fetch if it's running
-      if (this.isAutoFetching) {
-        this.stopAutoFetch();
-      }
-      
       // Add visual feedback
       refreshButton.classList.add('refreshing');
       
       try {
-        // If this is a virtual scrolling table, reset and load first page
-        if (this.virtualScrolling && typeof this.onNextPage === 'function') {
-          
-          // Preserve current filter/query before resetting
-          const preservedQuery = this.currentQuery;
-          const preservedEditorValue = this.queryEditor?.editor ? this.queryEditor.editor.getValue() : '';
-          
-          // Reset to loading state
-          this.isLoadingState = true;
-          this.data = [];
-          this.filteredData = [];
-          this.selectedRows.clear();
-
-          // Reset pagination state
-          this.currentPage = 0;
-          this.isLoading = true; // Set loading state before fetching
-          this.hasMoreData = true;
-          
-          
-          // Update the query engine with empty data
-          this.queryEngine.setObjects([]);
-          
-          // Re-render to show loading state
-          this.render();
-          
-          const firstPageToLoad = 0; // Start with page 0
-          const firstPageData = await this.onNextPage(firstPageToLoad, this.pageSize);
-          
-          // Clear loading state
-          this.isLoading = false;
-          
-          if (firstPageData && Array.isArray(firstPageData) && firstPageData.length > 0) {
-            this.replaceData(firstPageData);
-          } else {
-            // No data received, clear loading state
-            this.isLoadingState = false;
-            this.render();
-          }
-        } else {
-          // For non-virtual scrolling tables, call the onRefresh callback if provided
-          if (typeof this.onRefresh === 'function') {
-            // Set loading state if showLoadingPlaceholder is enabled
-            if (this.showLoadingPlaceholder) {
-              this.isLoadingState = true;
-              this.render(); // Show loading placeholder immediately
-            }
-            
-            await Promise.resolve(this.onRefresh());
-            
-            // Clear loading state after onRefresh completes
-            // (unless replaceData was called which already clears it)
-            if (this.isLoadingState) {
-              this.isLoadingState = false;
-              this.render();
-            }
-          } else {
-            console.log('ℹ️ Refresh: No onRefresh callback provided for non-virtual scrolling table');
-          }
-        }
+        // Call the public refresh method
+        await this.refresh();
       } catch (error) {
-        console.error('❌ Refresh error:', error);
-        // Clear loading state on error
-        this.isLoadingState = false;
-        this.render();
+        // Error already logged in refresh() method
       } finally {
         // Remove visual feedback after a minimum duration
         setTimeout(() => {
@@ -3034,6 +2969,86 @@ class DivTable {
 
   getSelectedRows() {
     return Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean);
+  }
+
+  /**
+   * Programmatically trigger a refresh of the table data
+   * This is the same functionality as clicking the refresh button
+   * @returns {Promise<void>} Promise that resolves when refresh is complete
+   */
+  async refresh() {
+    // Stop auto-fetch if it's running
+    if (this.isAutoFetching) {
+      this.stopAutoFetch();
+    }
+    
+    try {
+      // If this is a virtual scrolling table, reset and load first page
+      if (this.virtualScrolling && typeof this.onNextPage === 'function') {
+        
+        // Preserve current filter/query before resetting
+        const preservedQuery = this.currentQuery;
+        const preservedEditorValue = this.queryEditor?.editor ? this.queryEditor.editor.getValue() : '';
+        
+        // Reset to loading state
+        this.isLoadingState = true;
+        this.data = [];
+        this.filteredData = [];
+        this.selectedRows.clear();
+
+        // Reset pagination state
+        this.currentPage = 0;
+        this.isLoading = true; // Set loading state before fetching
+        this.hasMoreData = true;
+        
+        
+        // Update the query engine with empty data
+        this.queryEngine.setObjects([]);
+        
+        // Re-render to show loading state
+        this.render();
+        
+        const firstPageToLoad = 0; // Start with page 0
+        const firstPageData = await this.onNextPage(firstPageToLoad, this.pageSize);
+        
+        // Clear loading state
+        this.isLoading = false;
+        
+        if (firstPageData && Array.isArray(firstPageData) && firstPageData.length > 0) {
+          this.replaceData(firstPageData);
+        } else {
+          // No data received, clear loading state
+          this.isLoadingState = false;
+          this.render();
+        }
+      } else {
+        // For non-virtual scrolling tables, call the onRefresh callback if provided
+        if (typeof this.onRefresh === 'function') {
+          // Set loading state if showLoadingPlaceholder is enabled
+          if (this.showLoadingPlaceholder) {
+            this.isLoadingState = true;
+            this.render(); // Show loading placeholder immediately
+          }
+          
+          await Promise.resolve(this.onRefresh());
+          
+          // Clear loading state after onRefresh completes
+          // (unless replaceData was called which already clears it)
+          if (this.isLoadingState) {
+            this.isLoadingState = false;
+            this.render();
+          }
+        } else {
+          console.log('ℹ️ Refresh: No onRefresh callback provided for non-virtual scrolling table');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Refresh error:', error);
+      // Clear loading state on error
+      this.isLoadingState = false;
+      this.render();
+      throw error; // Re-throw so caller can handle the error
+    }
   }
 
   // Helper method to update query editor when field values change
