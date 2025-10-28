@@ -52,6 +52,7 @@ class DivTable {
     this.focusedRowId = null;
     this.currentQuery = '';
     this._lastFocusCallback = { rowId: null, groupKey: null }; // Track last focus callback to prevent duplicates
+    this.showOnlySelected = false; // Filter toggle state
     
     // Virtual scrolling state
     this.currentPage = 0;
@@ -1243,6 +1244,12 @@ class DivTable {
           } else {
             // If unchecked, clear selection
             this.clearSelection();
+            
+            // If filter is active, re-render to show all rows
+            if (this.showOnlySelected) {
+              this.renderBody();
+              this.updateInfoSection();
+            }
           }
         });
         checkboxCell.appendChild(checkbox);
@@ -1717,23 +1724,41 @@ class DivTable {
       return;
     }
 
-    if (this.filteredData.length === 0) {
+    // Apply selection filter on top of existing filters
+    let dataToRender = this.filteredData;
+    
+    // If filter is active but no rows are selected, turn off the filter automatically
+    if (this.showOnlySelected && this.selectedRows.size === 0) {
+      this.showOnlySelected = false;
+      console.log('👁️ No rows selected - automatically showing all rows');
+    }
+    
+    if (this.showOnlySelected && this.selectedRows.size > 0) {
+      dataToRender = this.filteredData.filter(item => {
+        const itemId = String(item[this.primaryKeyField]);
+        return this.selectedRows.has(itemId);
+      });
+    }
+
+    if (dataToRender.length === 0) {
       const emptyState = document.createElement('div');
       emptyState.className = 'div-table-empty';
-      emptyState.textContent = 'No data to display';
+      emptyState.textContent = this.showOnlySelected && this.selectedRows.size > 0 
+        ? 'No selected rows match current filters'
+        : 'No data to display';
       this.bodyContainer.appendChild(emptyState);
       return;
     }
 
     if (this.groupByField) {
-      this.renderGroupedRows();
+      this.renderGroupedRows(dataToRender);
     } else {
-      this.renderRegularRows();
+      this.renderRegularRows(dataToRender);
     }
   }
 
-  renderRegularRows() {
-    const sortedData = this.sortData(this.filteredData);
+  renderRegularRows(dataToRender = this.filteredData) {
+    const sortedData = this.sortData(dataToRender);
     
     sortedData.forEach(item => {
       const row = this.createRow(item);
@@ -1741,8 +1766,8 @@ class DivTable {
     });
   }
 
-  renderGroupedRows() {
-    let groups = this.groupData(this.filteredData);
+  renderGroupedRows(dataToRender = this.filteredData) {
+    let groups = this.groupData(dataToRender);
     
     // If sorting by the grouped column, sort the groups themselves
     if (this.sortColumn === this.groupByField) {
@@ -1864,6 +1889,26 @@ class DivTable {
           this.selectedRows.delete(rowId);
           rowData.selected = false;
           row.classList.remove('selected');
+          
+          // If filter is active and we just deselected a row, re-render to remove it from view
+          if (this.showOnlySelected) {
+            // Re-render the body to update the filtered view
+            this.renderBody();
+            // Update info section after render
+            this.updateInfoSection();
+            
+            // Trigger selection change callback
+            const selectedData = Array.from(this.selectedRows)
+              .map(id => this.findRowData(id))
+              .filter(Boolean);
+            
+            if (typeof this.onSelectionChange === 'function') {
+              this.onSelectionChange(selectedData);
+            }
+            
+            // Early return since we already updated everything
+            return;
+          }
         }
         
         // Update all checkbox states (group and header)
@@ -2115,7 +2160,14 @@ class DivTable {
       
       checkbox.addEventListener('change', (e) => {
         e.stopPropagation();
-        const shouldSelect = checkbox.checked;
+        
+        // Determine what action to take based on current selection state
+        // Check how many items in this group are currently selected
+        const groupItemIds = group.items.map(item => String(item[this.primaryKeyField]));
+        const currentlySelectedInGroup = groupItemIds.filter(id => this.selectedRows.has(id)).length;
+        
+        // If all or some are selected, deselect all. If none are selected, select all.
+        const shouldSelect = currentlySelectedInGroup === 0;
         
         // Select/deselect all items in the group
         group.items.forEach(item => {
@@ -2128,6 +2180,18 @@ class DivTable {
             item.selected = false;
           }
         });
+        
+        // If filter is active, always re-render to update the filtered view
+        if (this.showOnlySelected) {
+          this.renderBody();
+          this.updateInfoSection();
+          
+          // Trigger selection change callback
+          if (typeof this.onSelectionChange === 'function') {
+            this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+          }
+          return;
+        }
         
         // Update visual states for all rows
         this.updateSelectionStates();
@@ -2354,16 +2418,21 @@ class DivTable {
     const firstLineContainer = document.createElement('div');
     firstLineContainer.className = 'info-line-container';
     
-    // First line: Selection info (only show when there are selections)
+    // First line: Selection info and filter button (only show when there are selections)
+    // The button stays visible during loading as long as selectedRows is not empty
     if (selected > 0) {
       const selectionLine = document.createElement('div');
       selectionLine.className = 'info-line';
       
+      // Add filter selected only toggle button BEFORE the selection count
+      const filterSelectedOnlyToggleButton = this.createFilterSelectedOnlyToggleButton();
+      selectionLine.appendChild(filterSelectedOnlyToggleButton);
+      
       const selectionInfo = document.createElement('span');
       selectionInfo.className = 'info-selection';
       selectionInfo.textContent = `${selected} selected`;
-      
       selectionLine.appendChild(selectionInfo);
+      
       firstLineContainer.appendChild(selectionLine);
     }
     
@@ -2477,10 +2546,12 @@ class DivTable {
       const loadedPercentage = (loaded / currentTotal) * 100;
       const loadingEndPercentage = (loadingSegmentEnd / currentTotal) * 100;
       
-      const hasFilter = filtered < loaded;
+      // Only show red filtered segment when there's an actual query filter active
+      // Don't show it for the selected-rows-only filter (that's a UI toggle, not a data filter)
+      const hasQueryFilter = filtered < loaded && this.currentQuery && this.currentQuery.trim() !== '';
       
-      // When there's a filter active, show filtered (red) + loaded-not-filtered (gray)
-      if (hasFilter) {
+      // When there's a query filter active, show filtered (red) + loaded-not-filtered (gray)
+      if (hasQueryFilter) {
         // Segment 1: Filtered records (red, opacity 1)
         if (filtered > 0) {
           const filteredBar = document.createElement('div');
@@ -2526,9 +2597,9 @@ class DivTable {
       }
       
       // Set state for CSS styling
-      if (hasFilter && showLoadingProgress) {
+      if (hasQueryFilter && showLoadingProgress) {
         progressContainer.setAttribute('data-state', 'filtered-loading');
-      } else if (hasFilter) {
+      } else if (hasQueryFilter) {
         progressContainer.setAttribute('data-state', 'filtered');
       } else if (showLoadingProgress) {
         progressContainer.setAttribute('data-state', 'sequential-loading');
@@ -2717,6 +2788,58 @@ class DivTable {
     }
     
     this.updateInfoSection();
+  }
+
+  /**
+   * Create filter selected only toggle button for showing only selected rows
+   * @returns {HTMLButtonElement} The filter selected only toggle button element
+   */
+  createFilterSelectedOnlyToggleButton() {
+    const filterButton = document.createElement('button');
+    filterButton.className = 'filter-selected-only-toggle-button';
+    filterButton.type = 'button';
+    
+    const updateButtonState = () => {
+      if (this.showOnlySelected) {
+        filterButton.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        `;
+        filterButton.title = 'Show all rows';
+        filterButton.classList.add('active');
+      } else {
+        filterButton.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        `;
+        filterButton.title = 'Show only selected rows';
+        filterButton.classList.remove('active');
+      }
+    };
+    
+    updateButtonState();
+    
+    filterButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Toggle the filter state
+      this.showOnlySelected = !this.showOnlySelected;
+      
+      // Update button appearance
+      updateButtonState();
+      
+      // Re-render the table with the new filter
+      this.render();
+      
+      console.log(this.showOnlySelected ? '👁️ Showing only selected rows' : '👁️ Showing all rows');
+    });
+    
+    return filterButton;
   }
 
   updateInfoSectionWithAnticipatedProgress() {
@@ -2972,6 +3095,23 @@ class DivTable {
   }
 
   /**
+   * Toggle the filter to show only selected rows or all rows
+   * @param {boolean} [showOnlySelected] - Optional: explicitly set the filter state (true = show only selected, false = show all). If omitted, toggles current state.
+   * @returns {boolean} The new filter state
+   */
+  toggleSelectedRowsFilter(showOnlySelected) {
+    // If parameter provided, use it; otherwise toggle current state
+    this.showOnlySelected = showOnlySelected !== undefined ? showOnlySelected : !this.showOnlySelected;
+    
+    // Re-render the table with the new filter
+    this.render();
+    
+    console.log(this.showOnlySelected ? '👁️ Showing only selected rows' : '👁️ Showing all rows');
+    
+    return this.showOnlySelected;
+  }
+
+  /**
    * Programmatically trigger a refresh of the table data
    * This is the same functionality as clicking the refresh button
    * @returns {Promise<void>} Promise that resolves when refresh is complete
@@ -2986,15 +3126,15 @@ class DivTable {
       // If this is a virtual scrolling table, reset and load first page
       if (this.virtualScrolling && typeof this.onNextPage === 'function') {
         
-        // Preserve current filter/query before resetting
+        // Preserve current filter/query and selections before resetting
         const preservedQuery = this.currentQuery;
         const preservedEditorValue = this.queryEditor?.editor ? this.queryEditor.editor.getValue() : '';
+        const preservedSelections = new Set(this.selectedRows); // Preserve selections across refresh
         
         // Reset to loading state
         this.isLoadingState = true;
         this.data = [];
         this.filteredData = [];
-        this.selectedRows.clear();
 
         // Reset pagination state
         this.currentPage = 0;
@@ -3016,6 +3156,19 @@ class DivTable {
         
         if (firstPageData && Array.isArray(firstPageData) && firstPageData.length > 0) {
           this.replaceData(firstPageData);
+          
+          // Restore preserved selections after data is replaced
+          // Only keep selections that still exist in the new data
+          this.selectedRows.clear();
+          for (const selectedId of preservedSelections) {
+            const stillExists = this.data.some(item => String(item[this.primaryKeyField]) === selectedId);
+            if (stillExists) {
+              this.selectedRows.add(selectedId);
+            }
+          }
+          
+          // Re-render to update UI with restored selections
+          this.render();
         } else {
           // No data received, clear loading state
           this.isLoadingState = false;

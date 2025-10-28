@@ -11,6 +11,8 @@
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Toolbar */
@@ -21,6 +23,7 @@
   padding: 16px;
   background: #f9f9f7;
   border-bottom: 1px solid #e9ecef;
+  flex-shrink: 0;
 }
 
 /* Query input field */
@@ -235,6 +238,50 @@
   transition: transform 0.2s ease;
 }
 
+/* Filter selected only toggle button for showing only selected rows */
+.filter-selected-only-toggle-button {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  margin-right: 6px;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+}
+
+.filter-selected-only-toggle-button:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.filter-selected-only-toggle-button:active {
+  background-color: #e0e0e0;
+}
+
+.filter-selected-only-toggle-button.active {
+  color: #0ea5e9;
+  background-color: #e0f2fe;
+}
+
+.filter-selected-only-toggle-button.active:hover {
+  background-color: #bae6fd;
+}
+
+.filter-selected-only-toggle-button svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s ease;
+}
+
 .info-selection {
   font-weight: 600;
 }
@@ -386,6 +433,11 @@
 .div-table-container {
   width: 100%;
   background: white;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Header container - sticky */
@@ -402,6 +454,7 @@
   align-items: center;
   color: #374151;
   transition: box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
 }
 
 /* Scrollbar spacer to align header with body when scrollbar is present */
@@ -417,7 +470,8 @@
 
 /* Body container - scrollable */
 .div-table-body {
-  max-height: 400px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background: white;
 }
