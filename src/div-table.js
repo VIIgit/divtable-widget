@@ -46,6 +46,7 @@ class DivTable {
     this.filteredData = [...this.data];
     this.sortColumn = null;
     this.sortDirection = 'asc';
+    this.sortMode = 'value'; // 'value' for alphabetical, 'count' for count-based sorting (only used for grouped fields)
     this.groupByField = null;
     this.collapsedGroups = new Set();
     this.selectedRows = new Set();
@@ -1556,7 +1557,21 @@ class DivTable {
     
     if (this.sortColumn === col.field) {
       sortIndicator.style.opacity = '1';
-      sortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
+      
+      // Check if this is a grouped field to show special indicators
+      const isGroupedField = this.groupByField && col.field === this.groupByField;
+      
+      if (isGroupedField && this.sortMode === 'count') {
+        // Count-based sorting: show 1 or 9
+        sortIndicator.textContent = this.sortDirection === 'asc' ? '↑1' : '↓9';
+      } else if (isGroupedField && this.sortMode === 'value') {
+        // Value-based sorting on grouped field: show a or z
+        sortIndicator.textContent = this.sortDirection === 'asc' ? '↑A' : '↓Z';
+      } else {
+        // Regular sorting: standard arrows
+        sortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
+      }
+      
       headerCell.classList.add('sorted', this.sortDirection);
     } else {
       sortIndicator.textContent = '⇅';
@@ -1695,9 +1710,31 @@ class DivTable {
       
       subHeader.appendChild(rightContent);
       
-      // Sort indicator (CSS-based)
+      // Sort indicator (CSS-based and inline for special modes)
       if (this.sortColumn === col.field) {
         subHeader.classList.add('sorted', this.sortDirection);
+        
+        // Check if this is a grouped field to show special indicators
+        const isGroupedField = this.groupByField && col.field === this.groupByField;
+        
+        if (isGroupedField) {
+          // Add data attribute for CSS styling
+          subHeader.setAttribute('data-sort-mode', this.sortMode);
+          
+          // Add inline indicator for count/value sorting
+          const inlineSortIndicator = document.createElement('span');
+          inlineSortIndicator.style.marginLeft = '4px';
+          inlineSortIndicator.style.fontSize = '11px';
+          inlineSortIndicator.style.opacity = '0.8';
+          
+          if (this.sortMode === 'count') {
+            inlineSortIndicator.textContent = this.sortDirection === 'asc' ? '↑₁' : '↓₉';
+          } else {
+            inlineSortIndicator.textContent = this.sortDirection === 'asc' ? '↑ₐ' : '↓ᵤ';
+          }
+          
+          rightContent.appendChild(inlineSortIndicator);
+        }
       }
       
       // Click handler for sorting
@@ -1772,22 +1809,29 @@ class DivTable {
     // If sorting by the grouped column, sort the groups themselves
     if (this.sortColumn === this.groupByField) {
       groups = groups.sort((a, b) => {
-        if (a.value == null && b.value == null) return 0;
-        
-        // For undefined/null values in group sorting:
-        // - In ASC: nulls go to top (return -1 for null a, 1 for null b)  
-        // - In DESC: nulls go to bottom (return 1 for null a, -1 for null b)
-        if (a.value == null) return this.sortDirection === 'asc' ? -1 : 1;
-        if (b.value == null) return this.sortDirection === 'asc' ? 1 : -1;
-        
-        let result = 0;
-        if (typeof a.value === 'number' && typeof b.value === 'number') {
-          result = a.value - b.value;
+        if (this.sortMode === 'count') {
+          // Sort by item count
+          const countDiff = a.items.length - b.items.length;
+          return this.sortDirection === 'desc' ? -countDiff : countDiff;
         } else {
-          result = String(a.value).localeCompare(String(b.value));
+          // Sort by value (alphabetically)
+          if (a.value == null && b.value == null) return 0;
+          
+          // For undefined/null values in group sorting:
+          // - In ASC: nulls go to top (return -1 for null a, 1 for null b)  
+          // - In DESC: nulls go to bottom (return 1 for null a, -1 for null b)
+          if (a.value == null) return this.sortDirection === 'asc' ? -1 : 1;
+          if (b.value == null) return this.sortDirection === 'asc' ? 1 : -1;
+          
+          let result = 0;
+          if (typeof a.value === 'number' && typeof b.value === 'number') {
+            result = a.value - b.value;
+          } else {
+            result = String(a.value).localeCompare(String(b.value));
+          }
+          
+          return this.sortDirection === 'desc' ? -result : result;
         }
-        
-        return this.sortDirection === 'desc' ? -result : result;
       });
     }
     
@@ -2962,11 +3006,43 @@ class DivTable {
   }
 
   sort(field, direction) {
-    if (this.sortColumn === field) {
-      this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+    // Check if this field is the currently grouped field
+    const isGroupedField = this.groupByField && field === this.groupByField;
+    
+    if (isGroupedField) {
+      // 4-state cycle for grouped fields: value-asc -> value-desc -> count-asc -> count-desc -> none
+      if (this.sortColumn === field) {
+        if (this.sortMode === 'value' && this.sortDirection === 'asc') {
+          // State 1 -> State 2: value-asc to value-desc
+          this.sortDirection = 'desc';
+        } else if (this.sortMode === 'value' && this.sortDirection === 'desc') {
+          // State 2 -> State 3: value-desc to count-asc
+          this.sortMode = 'count';
+          this.sortDirection = 'asc';
+        } else if (this.sortMode === 'count' && this.sortDirection === 'asc') {
+          // State 3 -> State 4: count-asc to count-desc
+          this.sortDirection = 'desc';
+        } else {
+          // State 4 -> State 5: count-desc to none (clear sorting)
+          this.sortColumn = null;
+          this.sortDirection = 'asc';
+          this.sortMode = 'value';
+        }
+      } else {
+        // Start fresh cycle: begin with value-asc
+        this.sortColumn = field;
+        this.sortDirection = 'asc';
+        this.sortMode = 'value';
+      }
     } else {
-      this.sortColumn = field;
-      this.sortDirection = direction || 'asc';
+      // Regular 2-state toggle for non-grouped fields: asc <-> desc
+      if (this.sortColumn === field) {
+        this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortColumn = field;
+        this.sortDirection = direction || 'asc';
+        this.sortMode = 'value'; // Reset to value mode for non-grouped fields
+      }
     }
     
     this.render();
