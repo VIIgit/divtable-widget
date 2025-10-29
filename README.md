@@ -10,11 +10,13 @@ A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML 
 - **Advanced Query Language**: Monaco Editor integration with intelligent autocomplete and syntax highlighting
 - **Virtual Scrolling**: Efficiently handle large datasets with pagination support
 - **Auto-Fetch**: Automated pagination with play/pause/resume controls
-- **Grouping & Sorting**: Multi-level grouping and sorting capabilities
+- **Grouping & Sorting**: Multi-level grouping with 4-state sorting (alphabetical asc/desc, count asc/desc)
 - **Selection Management**: Single and multi-row selection with checkbox support
-- **Loading States**: Configurable loading placeholders and progress indicators
+- **Filter Selected Rows**: Toggle to show only selected rows
+- **Loading States**: Configurable loading placeholders and progress indicators with visual feedback
 - **Keyboard Navigation**: Full keyboard accessibility with arrow key navigation
 - **Responsive Design**: Adaptive column sizing and mobile-friendly layout
+- **Composite Columns**: Stack multiple fields in one column or create two-line headers
 
 ## Installation
 
@@ -95,38 +97,40 @@ const divTable = new DivTable(monaco, {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tableWidgetElement` | HTMLElement | **required** | Container element for the table |
-| `columns` | Array | **required** | Column definitions |
-| `data` | Array | `[]` | Initial data array |
+| `columns` | Array | **required** | Column definitions (see Column Configuration) |
+| `data` | Array | `[]` | Initial data array. If not provided and `onNextPage` is available, first page will be loaded automatically |
 | `showCheckboxes` | Boolean | `true` | Show selection checkboxes |
 | `multiSelect` | Boolean | `true` | Allow multiple row selection |
+| `primaryKeyField` | String | `'id'` | Field to use as primary key (auto-detected from columns if not specified) |
 
 ### Virtual Scrolling Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `virtualScrolling` | Boolean | `false` | Enable virtual scrolling mode |
+| `virtualScrolling` | Boolean | `false` | Enable virtual scrolling mode for large datasets |
 | `pageSize` | Number | `100` | Number of rows per page |
-| `totalRecords` | Number | `data.length` | Total number of records |
+| `totalRecords` | Number | `pageSize * 10` | Total number of records available (for progress calculation) |
 | `loadingThreshold` | Number | `pageSize * 0.8` | Trigger loading when this many rows from end |
-| `showAutoFetchButton` | Boolean | `true` | Show auto-fetch play/pause controls |
-| `autoFetchDelay` | Number | `500` | Delay between auto-fetch requests (ms) |
+| `scrollThreshold` | Number | `0.95` | Fallback percentage-based scroll threshold |
+| `showAutoFetchButton` | Boolean | `true` | Show auto-fetch play/pause/resume button |
+| `autoFetchDelay` | Number | `500` | Delay between auto-fetch requests (milliseconds) |
 
-### Callbacks
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `onSelectionChange` | Function | Called when row selection changes |
-| `onRowFocus` | Function | Called when a row receives focus |
-| `onNextPage` | Function | Called to load next page of data |
-| `onPreviousPage` | Function | Called to load previous page |
-| `onRefresh` | Function | Called when refresh button is clicked |
-
-### Loading Options
+### UI Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `showLoadingPlaceholder` | Boolean | `true` | Show loading state when no data |
-| `showRefreshButton` | Boolean | `false` | Show refresh button in toolbar |
+| `showLoadingPlaceholder` | Boolean | `true` | Show loading skeleton when no data is present |
+| `showRefreshButton` | Boolean | `false` | Show refresh button in info section |
+
+### Callbacks
+
+| Option | Type | Parameters | Description |
+|--------|------|------------|-------------|
+| `onSelectionChange` | Function | `(selectedRows)` | Called when row selection changes. Receives array of selected data objects |
+| `onRowFocus` | Function | `(rowData, groupInfo)` | Called when a row or group header receives focus |
+| `onNextPage` | Function | `(page, pageSize)` | Called to load next page of data. Should return array of records or Promise |
+| `onPreviousPage` | Function | `(page, pageSize)` | Called to load previous page (optional) |
+| `onRefresh` | Function | `()` | Called when refresh button is clicked. Should reload data |
 
 ## Query Language
 
@@ -162,71 +166,96 @@ created_at BETWEEN (2024-01-01, 2024-12-31)
 status IN (active, pending, review)
 ```
 
+## Keyboard Navigation
+
+The widget provides full keyboard accessibility:
+
+### Navigation Keys
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate between rows and group headers |
+| `→` | Expand collapsed group (when focused on group header) |
+| `←` | Collapse expanded group (when focused on group header) |
+| `Space` / `Enter` | Toggle selection of focused row or group |
+| `Tab` | Navigate between checkboxes (if enabled) |
+
+### Focus Behavior
+
+- When checkboxes are enabled, focus moves to the checkbox element
+- When checkboxes are disabled, focus moves to the row element
+- Group headers are always focusable and can be expanded/collapsed with arrow keys
+- Selection changes trigger the `onSelectionChange` callback
+- Focus changes trigger the `onRowFocus` callback
+
 ## API Methods
 
 ### Data Management
 
 ```javascript
-// Update the table with new data
-divTable.updateData(newData);
+// Apply a query filter to the data
+divTable.applyQuery('status = "active" AND age > 18');
 
-// Append data (for pagination)
-divTable.appendData(moreData);
+// Add a single record (upsert - updates if exists, adds if new)
+divTable.addRecord({ id: 1, name: 'John Doe', email: 'john@example.com' });
 
-// Set total record count
-divTable.setTotalRecords(1000);
+// Remove a record by ID
+const removedRecord = divTable.removeRecord(1);
 
-// Get current data
-const data = divTable.getData();
+// Refresh the table data (reloads from onNextPage if virtual scrolling)
+await divTable.refresh();
 ```
 
 ### Selection
 
 ```javascript
-// Get selected rows
+// Get selected rows (returns array of data objects)
 const selected = divTable.getSelectedRows();
 
-// Select row by ID
-divTable.selectRow(rowId);
+// Toggle filter to show only selected rows
+divTable.toggleSelectedRowsFilter(true);  // Show only selected
+divTable.toggleSelectedRowsFilter(false); // Show all rows
+divTable.toggleSelectedRowsFilter();      // Toggle current state
 
-// Clear selection
+// Clear all selections
 divTable.clearSelection();
-```
-
-### Loading State
-
-```javascript
-// Show loading state
-divTable.setLoading(true);
-
-// Hide loading state
-divTable.setLoading(false);
-```
-
-### Auto-Fetch Controls
-
-```javascript
-// Start auto-fetching
-divTable.startAutoFetch();
-
-// Pause auto-fetching
-divTable.pauseAutoFetch();
-
-// Resume auto-fetching
-divTable.resumeAutoFetch();
-
-// Stop auto-fetching
-divTable.stopAutoFetch();
 ```
 
 ### Grouping and Sorting
 
 ```javascript
-// Group by field
-divTable.groupBy('category');
+// Group by a field
+divTable.group('category');
 
-// Sort by column
-divTable.sortBy('name', 'asc'); // or 'desc'
+// Clear grouping
+divTable.clearGrouping();
+
+// Sort by a field
+divTable.sort('name', 'asc'); // 'asc' or 'desc'
+divTable.sort('age');         // Toggles between asc/desc
+
+// For grouped fields, sorting cycles through 4 states:
+// 1. Sort groups alphabetically ascending (↑ₐ)
+// 2. Sort groups alphabetically descending (↓z)
+// 3. Sort groups by count ascending (↑₁)
+// 4. Sort groups by count descending (↓₉)
+// 5. Back to no sort
+```
+
+### Auto-Fetch Controls
+
+```javascript
+// The auto-fetch feature automatically loads pages with play/pause/resume controls
+// These methods are called internally by the UI buttons, but can also be called programmatically:
+
+// Start auto-fetching all pages
+divTable.startAutoFetch();
+
+// Stop auto-fetching
+divTable.stopAutoFetch();
+
+// Note: Pause/resume is handled automatically by the UI button
+// The isAutoFetching and autoFetchPaused properties track the state
 ```
 
 ## Column Configuration
@@ -235,20 +264,83 @@ divTable.sortBy('name', 'asc'); // or 'desc'
 
 ```javascript
 {
-  field: 'name',        // Data field name
-  header: 'Full Name',  // Display header
-  primaryKey: false     // Is this the primary key?
+  field: 'name',           // Data field name (required)
+  label: 'Full Name',      // Display header (optional, defaults to field)
+  primaryKey: false,       // Is this the primary key? (required for one column)
+  hidden: false,           // Hide column (default: false)
+  groupable: true,         // Allow grouping by this column (default: true)
+  render: (value, item) => `<strong>${value}</strong>` // Custom render function
+}
+```
+
+### Advanced Column Features
+
+#### Responsive Sizing
+
+```javascript
+{
+  field: 'description',
+  label: 'Description',
+  responsive: {
+    size: 'flexible-large' // 'fixed-narrow' (80px), 'fixed-medium' (120px),
+                          // 'flexible-small' (1fr), 'flexible-medium' (2fr),
+                          // 'flexible-large' (3fr)
+  }
+}
+```
+
+#### Composite Columns (Multiple Fields in One Column)
+
+```javascript
+// Stack multiple fields vertically in one column
+{
+  field: 'firstName',
+  label: 'First Name',
+  fieldCompositeName: 'fullName'
+},
+{
+  field: 'lastName',
+  label: 'Last Name',
+  fieldCompositeName: 'fullName'
+}
+```
+
+#### Compound Columns (Two-Line Headers)
+
+```javascript
+// Display two labels for one field (main label + sub label)
+{
+  field: 'price',
+  label: 'Product Price',
+  subLabel: 'USD',
+  subField: 'currency' // Optional: allows sorting by subField
+}
+```
+
+### Column Render Function
+
+Custom rendering for cell values:
+
+```javascript
+{
+  field: 'status',
+  label: 'Status',
+  render: (value, item) => {
+    const colors = { active: 'green', inactive: 'red', pending: 'orange' };
+    return `<span style="color: ${colors[value]}">${value}</span>`;
+  }
 }
 ```
 
 ### Column Types
 
-The widget automatically handles different data types:
+The widget automatically detects and handles different data types based on the data:
 
 - **Strings**: Text data with CONTAINS, STARTS_WITH, ENDS_WITH operators
-- **Numbers**: Numeric data with comparison operators
+- **Numbers**: Numeric data with comparison operators (>, <, >=, <=)
 - **Dates**: Date/time values with BETWEEN operator
 - **Booleans**: True/false values with = operator
+- **Arrays**: Array values are joined with commas for display
 
 ## Styling
 
