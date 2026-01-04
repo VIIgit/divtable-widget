@@ -1332,7 +1332,6 @@ class DivTable {
       mainLabel.className = 'compound-main-header';
       mainLabel.innerHTML = col.label || col.field;
       mainLabel.style.fontWeight = '600';
-      mainLabel.style.fontSize = '13px';
       mainLabel.style.color = '#374151';
       mainLabel.style.textAlign = 'left';
       mainLabel.style.flex = '1';
@@ -1340,6 +1339,7 @@ class DivTable {
       
       // Right-aligned indicators wrapper
       const rightContent = document.createElement('div');
+      rightContent.className = 'header-right-content';
       rightContent.style.display = 'flex';
       rightContent.style.alignItems = 'center';
       rightContent.style.gap = '4px';
@@ -1373,12 +1373,11 @@ class DivTable {
       
       // Add sort indicator placeholder
       const sortIndicator = document.createElement('span');
-      sortIndicator.style.opacity = '0.5';
-      sortIndicator.style.fontSize = '12px';
+      sortIndicator.className = 'sort-indicator';
       sortIndicator.style.marginLeft = '4px';
       
       if (this.sortColumn === col.field) {
-        sortIndicator.style.opacity = '1';
+        sortIndicator.classList.add('active');
         sortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
       } else {
         sortIndicator.textContent = '⇅';
@@ -1400,7 +1399,6 @@ class DivTable {
       
       const subLabel = document.createElement('span');
       subLabel.innerHTML = col.subLabel;
-      subLabel.style.fontSize = '11px';
       subLabel.style.color = '#6b7280';
       subLabel.style.textAlign = 'left';
       subLabel.style.flex = '1';
@@ -1409,12 +1407,11 @@ class DivTable {
       // Add sort indicator for sub-field
       if (col.subField) {
         const subSortIndicator = document.createElement('span');
-        subSortIndicator.style.opacity = '0.5';
-        subSortIndicator.style.fontSize = '11px';
+        subSortIndicator.className = 'sub-sort-indicator';
         subSortIndicator.style.marginLeft = '4px';
         
         if (this.sortColumn === col.subField) {
-          subSortIndicator.style.opacity = '1';
+          subSortIndicator.classList.add('active');
           subSortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
         } else {
           subSortIndicator.textContent = '⇅';
@@ -1503,7 +1500,7 @@ class DivTable {
       countSpan.className = 'group-count';
       countSpan.innerHTML = `&nbsp;(${groupCount})`;
       countSpan.style.opacity = '0.8';
-      countSpan.style.fontSize = '0.85em';
+      countSpan.style.fontSize = '0.9em';
       countSpan.style.fontWeight = 'normal';
       countSpan.title = `${groupCount} distinct value${groupCount === 1 ? '' : 's'} in ${columnLabel}`;
       leftContent.appendChild(countSpan);
@@ -1551,12 +1548,12 @@ class DivTable {
     
     // Add sort indicator
     const sortIndicator = document.createElement('span');
-    sortIndicator.style.opacity = '0.5';
+    sortIndicator.className = 'sort-indicator';
     sortIndicator.style.fontSize = '12px';
     sortIndicator.style.marginLeft = '4px';
     
     if (this.sortColumn === col.field) {
-      sortIndicator.style.opacity = '1';
+      sortIndicator.classList.add('active');
       
       // Check if this is a grouped field to show special indicators
       const isGroupedField = this.groupByField && col.field === this.groupByField;
@@ -1664,7 +1661,7 @@ class DivTable {
         groupCountSpan.className = 'group-count';
         groupCountSpan.innerHTML = `&nbsp;(${groupCount})`;
         groupCountSpan.style.opacity = '0.8';
-        groupCountSpan.style.fontSize = '0.85em';
+        groupCountSpan.style.fontSize = '0.9em';
         groupCountSpan.style.fontWeight = 'normal';
         groupCountSpan.title = `${groupCount} distinct value${groupCount === 1 ? '' : 's'} in ${columnLabel}`;
         leftContent.appendChild(groupCountSpan);
@@ -1708,34 +1705,32 @@ class DivTable {
         rightContent.appendChild(groupIndicator);
       }
       
-      subHeader.appendChild(rightContent);
+      // Add sort indicator
+      const sortIndicator = document.createElement('span');
+      sortIndicator.className = 'sort-indicator';
+      sortIndicator.style.marginLeft = '4px';
       
-      // Sort indicator (CSS-based and inline for special modes)
       if (this.sortColumn === col.field) {
-        subHeader.classList.add('sorted', this.sortDirection);
+        sortIndicator.classList.add('active');
         
         // Check if this is a grouped field to show special indicators
         const isGroupedField = this.groupByField && col.field === this.groupByField;
         
-        if (isGroupedField) {
-          // Add data attribute for CSS styling
-          subHeader.setAttribute('data-sort-mode', this.sortMode);
-          
-          // Add inline indicator for count/value sorting
-          const inlineSortIndicator = document.createElement('span');
-          inlineSortIndicator.style.marginLeft = '4px';
-          inlineSortIndicator.style.fontSize = '11px';
-          inlineSortIndicator.style.opacity = '0.8';
-          
-          if (this.sortMode === 'count') {
-            inlineSortIndicator.textContent = this.sortDirection === 'asc' ? '↑₁' : '↓₉';
-          } else {
-            inlineSortIndicator.textContent = this.sortDirection === 'asc' ? '↑ₐ' : '↓ᵤ';
-          }
-          
-          rightContent.appendChild(inlineSortIndicator);
+        if (isGroupedField && this.sortMode === 'count') {
+          sortIndicator.textContent = this.sortDirection === 'asc' ? '↑1' : '↓9';
+        } else if (isGroupedField && this.sortMode === 'value') {
+          sortIndicator.textContent = this.sortDirection === 'asc' ? '↑A' : '↓Z';
+        } else {
+          sortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
         }
+        
+        subHeader.classList.add('sorted', this.sortDirection);
+      } else {
+        sortIndicator.textContent = '⇅';
       }
+      
+      rightContent.appendChild(sortIndicator);
+      subHeader.appendChild(rightContent);
       
       // Click handler for sorting
       subHeader.addEventListener('click', (e) => {
@@ -2291,7 +2286,7 @@ class DivTable {
     
     // Create a span for the group text that can handle HTML
     const textSpan = document.createElement('span');
-    textSpan.style.fontWeight = '500';
+    //textSpan.style.fontWeight = '500';
     if (typeof renderedGroupValue === 'string') {
       textSpan.innerHTML = renderedGroupValue;
     } else {
@@ -2304,7 +2299,7 @@ class DivTable {
     countSpan.className = 'group-item-count';
     countSpan.innerHTML = `(${group.items.length})`;
     countSpan.style.opacity = '0.8';
-    countSpan.style.fontSize = '0.85em';
+    countSpan.style.fontSize = '0.9em';
     countSpan.style.fontWeight = 'normal';
     countSpan.title = `${group.items.length} item${group.items.length === 1 ? '' : 's'} in this group`;
     cell.appendChild(countSpan);

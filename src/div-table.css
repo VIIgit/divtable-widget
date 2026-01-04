@@ -65,6 +65,7 @@
 
 .query-inputfield .monaco-editor {
   height: 22px !important;
+  --vscode-focusBorder: rgba(0, 0, 0, 0);
 }
 
 /* Toolbar elements */
@@ -451,7 +452,7 @@
   border-bottom: 1px solid #e9ecef;
   display: grid;
   min-height: 48px;
-  align-items: center;
+  align-items: start;
   color: #374151;
   transition: box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
@@ -514,7 +515,7 @@
   cursor: pointer;
   user-select: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   transition: background-color 0.2s ease;
   overflow: hidden;
@@ -524,7 +525,15 @@
   display: flex;
   align-items: center;
   gap: 0;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.header-left-content > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-right-content {
@@ -532,28 +541,101 @@
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
-  margin-left: auto;
+  margin-left: 8px;
 }
 
 .div-table-header-cell:hover {
   background-color: rgba(0, 0, 0, 0.05);
 }
 
-/* Group indicator styling */
+/* Group indicator styling - hidden by default */
 .group-indicator {
   font-size: 12px;
-  opacity: 0.5;
+  width: 14px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
   transition: opacity 0.2s ease;
 }
 
-.group-indicator:hover {
-  opacity: 1;
+/* Show group indicator on hover of header cell */
+.div-table-header-cell:hover .group-indicator {
+  opacity: 0.5;
 }
 
-/* When column is grouped, make indicator full opacity (black like title) */
+.group-indicator:hover {
+  opacity: 1 !important;
+}
+
+/* When column is grouped, always show indicator at full opacity */
 .group-indicator.grouped {
-  opacity: 1;
+  opacity: 1 !important;
   color: inherit;
+}
+
+/* Sort indicator styling - hidden by default */
+.sort-indicator {
+  width: 14px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+/* Show sort indicator on hover of header cell */
+.div-table-header-cell:hover .sort-indicator {
+  opacity: 0.5;
+}
+
+/* Always show active sort indicator */
+.sort-indicator.active {
+  opacity: 1 !important;
+}
+
+/* Legacy: Sort indicator in header-right-content - hidden by default */
+.header-right-content > span:last-child:not(.group-indicator):not(.sort-indicator) {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+/* Show sort indicator on hover */
+.div-table-header-cell:hover .header-right-content > span:last-child:not(.group-indicator):not(.sort-indicator) {
+  opacity: 0.5;
+}
+
+/* Always show active sort indicator */
+.div-table-header-cell.sorted .header-right-content > span:last-child:not(.sort-indicator) {
+  opacity: 1 !important;
+}
+
+/* Compound header sub-sort indicator - hidden by default */
+.sub-sort-indicator {
+  width: 14px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+/* Show sub-sort indicator on hover of the compound header cell */
+.compound-header:hover .sub-sort-indicator {
+  opacity: 0.5;
+}
+
+/* Show sub-sort indicator on hover of the sub-header itself */
+.compound-sub-header:hover .sub-sort-indicator {
+  opacity: 0.5;
+}
+
+/* Always show active sub-sort indicator */
+.sub-sort-indicator.active {
+  opacity: 1 !important;
 }
 
 /* Checkbox column */
@@ -618,7 +700,7 @@ input[type="checkbox"]:indeterminate::after {
 }
 
 .div-table-row.group-header.focused:hover {
-  background-color: rgb(240, 247, 255);
+  background-color: rgb(240, 247, 255) !important;
 }
 
 /* Group header styling */
@@ -632,6 +714,10 @@ input[type="checkbox"]:indeterminate::after {
   z-index: 9;
   box-shadow: none;
   isolation: isolate;
+}
+
+.div-table-row.group-header:hover {
+  background-color: rgb(240, 247, 255);
 }
 
 /* Add shadow only to the first group header (when sticky) */
@@ -707,7 +793,6 @@ input[type="checkbox"]:indeterminate::after {
 /* First child (.compound-main) renders like normal cell - no special styling */
 
 .compound-sub {
-  font-size: 11px;
   color: #6b7280;
   line-height: 1.2;
 }
@@ -730,7 +815,6 @@ input[type="checkbox"]:indeterminate::after {
 }
 
 .composite-sub-cell:not(:first-child) {
-  font-size: 11px;
   color: #6b7280;
 }
 
@@ -754,13 +838,11 @@ input[type="checkbox"]:indeterminate::after {
 
 .composite-sub-header:first-child {
   font-weight: 600;
-  font-size: 13px;
   color: #374151;
   margin-bottom: 4px;
 }
 
 .composite-sub-header:not(:first-child) {
-  font-size: 11px;
 }
 
 .composite-sub-header:hover {
@@ -778,45 +860,6 @@ input[type="checkbox"]:indeterminate::after {
 
 .composite-toggle:hover {
   opacity: 0.7;
-}
-
-/* Sort placeholder for unsorted composite columns */
-.composite-sub-header.sortable::after {
-  content: '⇅';
-  margin-left: 6px;
-  opacity: 0.5;
-  font-size: 11px;
-}
-
-.composite-sub-header.sorted {
-  position: relative;
-}
-
-.composite-sub-header.sorted::after {
-  content: '⇅';
-  display: inline-block;
-  width: 0;
-  height: 0;
-  margin-left: 6px;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  opacity: 1;
-}
-
-.composite-sub-header.sorted.asc::after {
-  content: '↑';
-  border: none;
-  width: auto;
-  height: auto;
-  opacity: 1;
-}
-
-.composite-sub-header.sorted.desc::after {
-  content: '↓';
-  border: none;
-  width: auto;
-  height: auto;
-  opacity: 1;
 }
 
 /* Hide collapsed group rows */
