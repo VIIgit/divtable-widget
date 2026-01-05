@@ -76,6 +76,16 @@ class DivTable {
     
     // Initialize the widget
     this.init();
+
+    // Apply initial grouping if specified
+    if (options.group) {
+      this.group(options.group);
+    }
+
+    // Apply initial sorting if specified
+    if (options.sort && options.sort.field) {
+      this.sort(options.sort.field, options.sort.direction);
+    }
   }
 
   init() {

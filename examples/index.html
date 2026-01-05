@@ -357,6 +357,8 @@
               fieldCompositeName: 'locationStatus'
             }
           ],
+          group: 'department',
+          sort: { field: 'city', direction: 'asc' },
           showCheckboxes: true,
           multiSelect: true,
 
@@ -392,11 +394,6 @@
             }
           }
         });
-
-        // Optional: Group by department to demonstrate virtual scrolling with grouping
-        setTimeout(() => {
-          virtualScrollingTable.group('department');
-        }, 1000);
       });
 
       // API Examples - Initialize query feature like in smart-table:

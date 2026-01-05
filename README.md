@@ -56,6 +56,9 @@ npm install divtable-widget monaco-editor
           { id: 1, name: 'John Doe', email: 'john@example.com', status: 'active' },
           { id: 2, name: 'Jane Smith', email: 'jane@example.com', status: 'inactive' }
         ],
+        // New: Set initial grouping and sorting
+        group: 'status', // Group by 'status' field on load
+        sort: { field: 'name', direction: 'asc' }, // Sort by 'name' ascending on load
         showCheckboxes: true,
         multiSelect: true,
         onSelectionChange: (selectedRows) => {
@@ -102,6 +105,8 @@ const divTable = new DivTable(monaco, {
 | `showCheckboxes` | Boolean | `true` | Show selection checkboxes |
 | `multiSelect` | Boolean | `true` | Allow multiple row selection |
 | `primaryKeyField` | String | `'id'` | Field to use as primary key (auto-detected from columns if not specified) |
+| `group` | String | `null` | Field to group by initially (applies grouping on load) |
+| `sort` | Object | `null` | Initial sort: `{ field: string, direction: 'asc'|'desc' }` |
 
 ### Virtual Scrolling Options
 
