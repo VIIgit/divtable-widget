@@ -12,6 +12,17 @@ class DivTable {
     this.data = hasExplicitData ? options.data : [];
     
     this.columns = options.columns || [];
+    
+    // Check for deprecated subLabel/subField/subType/subRender properties
+    this.columns.forEach(col => {
+      if (col.subLabel || col.subField || col.subType || col.subRender) {
+        console.warn(
+          `DivTable: Column '${col.field}' uses deprecated properties (subLabel, subField, subType, subRender). ` +
+          `Please migrate to fieldCompositeName approach. See README for migration guide.`
+        );
+      }
+    });
+    
     this.showCheckboxes = options.showCheckboxes !== false;
     this.multiSelect = options.multiSelect !== false;
     this.onSelectionChange = options.onSelectionChange || (() => {});
@@ -359,7 +370,7 @@ class DivTable {
         fieldNames[field] = { type: fieldType, values: fieldValues };
       });
       
-      // Also add subFields from compound columns
+      // Also add subFields from composite columns
       this.columns.forEach(col => {
         if (col.subField && !col.hidden && sampleItem[col.subField] !== undefined) {
           const field = col.subField;
@@ -420,7 +431,7 @@ class DivTable {
           };
         }
         
-        // Also add subFields from compound columns
+        // Also add subFields from composite columns
         if (col.subField && !col.hidden) {
           fieldNames[col.subField] = { 
             type: col.subType || col.type || 'string', 
@@ -1320,10 +1331,10 @@ class DivTable {
   }
 
   renderSingleHeaderCell(headerCell, col) {
-    // Check if this column has a subLabel (compound column with two-line header)
+    // Check if this column has a subLabel (composite column with two-line header)
     if (col.subLabel) {
-      // Create vertical stacked header similar to composite headers
-      headerCell.classList.add('compound-header');
+      // Create vertical stacked header for composite columns
+      headerCell.classList.add('composite-header');
       headerCell.style.display = 'flex';
       headerCell.style.flexDirection = 'column';
       headerCell.style.gap = '0';
@@ -1339,7 +1350,7 @@ class DivTable {
       
       // Main label
       const mainLabel = document.createElement('span');
-      mainLabel.className = 'compound-main-header';
+      mainLabel.className = 'composite-main-header';
       mainLabel.innerHTML = col.label || col.field;
       mainLabel.style.fontWeight = '600';
       mainLabel.style.color = '#374151';
@@ -1399,7 +1410,7 @@ class DivTable {
       
       // Sub label with sorting capability
       const subLabelContainer = document.createElement('div');
-      subLabelContainer.className = 'compound-sub-header sortable';
+      subLabelContainer.className = 'composite-sub-header sortable';
       subLabelContainer.style.display = 'flex';
       subLabelContainer.style.alignItems = 'center';
       subLabelContainer.style.width = '100%';
@@ -2022,13 +2033,13 @@ class DivTable {
           } else {
             // Check if this column has subField (vertical stacking within the sub-cell)
             if (col.subField) {
-              subCell.classList.add('compound-column');
+              subCell.classList.add('composite-column');
               subCell.style.display = 'flex';
               subCell.style.flexDirection = 'column';
               subCell.style.gap = '2px';
               
               const mainDiv = document.createElement('div');
-              mainDiv.className = 'compound-main';
+              mainDiv.className = 'composite-main';
               if (typeof col.render === 'function') {
                 mainDiv.innerHTML = col.render(item[col.field], item);
               } else {
@@ -2036,7 +2047,7 @@ class DivTable {
               }
               
               const subDiv = document.createElement('div');
-              subDiv.className = 'compound-sub';
+              subDiv.className = 'composite-sub';
               if (typeof col.subRender === 'function') {
                 subDiv.innerHTML = col.subRender(item[col.subField], item);
               } else {
@@ -2066,12 +2077,12 @@ class DivTable {
           cell.classList.add('grouped-column');
           cell.textContent = '';
         } else {
-          // Check if this is a compound column with subField (vertical stacking)
+          // Check if this is a composite column with subField (vertical stacking)
           if (col.subField) {
-            cell.classList.add('compound-column');
+            cell.classList.add('composite-column');
             
             const mainDiv = document.createElement('div');
-            mainDiv.className = 'compound-main';
+            mainDiv.className = 'composite-main';
             if (typeof col.render === 'function') {
               mainDiv.innerHTML = col.render(item[col.field], item);
             } else {
@@ -2079,7 +2090,7 @@ class DivTable {
             }
             
             const subDiv = document.createElement('div');
-            subDiv.className = 'compound-sub';
+            subDiv.className = 'composite-sub';
             if (typeof col.subRender === 'function') {
               subDiv.innerHTML = col.subRender(item[col.subField], item);
             } else {

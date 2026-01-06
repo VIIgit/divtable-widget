@@ -612,7 +612,7 @@
   opacity: 1 !important;
 }
 
-/* Compound header sub-sort indicator - hidden by default */
+/* Composite header sub-sort indicator - hidden by default */
 .sub-sort-indicator {
   width: 14px;
   height: 20px;
@@ -623,13 +623,13 @@
   transition: opacity 0.2s ease;
 }
 
-/* Show sub-sort indicator on hover of the compound header cell */
-.compound-header:hover .sub-sort-indicator {
+/* Show sub-sort indicator on hover of the composite header cell */
+.composite-header:hover .sub-sort-indicator {
   opacity: 0.5;
 }
 
 /* Show sub-sort indicator on hover of the sub-header itself */
-.compound-sub-header:hover .sub-sort-indicator {
+.composite-sub-header:hover .sub-sort-indicator {
   opacity: 0.5;
 }
 
@@ -646,14 +646,16 @@
   max-width: 40px;
   justify-content: center;
   align-items: center;
-  padding: 4px;
+  padding: 8px 4px;
 }
 
-.div-table-cell.checkbox-column input[type="checkbox"] {
+.div-table-cell.checkbox-column input[type="checkbox"],
+.div-table-header-cell.checkbox-column input[type="checkbox"] {
   margin: 0;
   cursor: pointer;
   accent-color: #007bff;
-  width: 10px;
+  width: 15px;
+  height: 15px;
 }
 
 /* Three-state checkbox styling */
@@ -709,11 +711,17 @@ input[type="checkbox"]:indeterminate::after {
   font-weight: normal;
   color: #495057;
   border-bottom: 1px solid #f1f3f4;
+  border-top: 1px solid #f1f3f4;
   position: sticky;
   top: 0px;
   z-index: 9;
   box-shadow: none;
   isolation: isolate;
+}
+
+/* First group header doesn't need top border */
+.div-table-row.group-header:first-of-type {
+  border-top: none;
 }
 
 .div-table-row.group-header:hover {
@@ -738,8 +746,8 @@ input[type="checkbox"]:indeterminate::after {
 }
 
 .div-table-row.group-header .checkbox-column input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   cursor: pointer;
   accent-color: #007bff;
 }
@@ -780,8 +788,8 @@ input[type="checkbox"]:indeterminate::after {
   font-style: italic;
 }
 
-/* Compound column styling - for stacked fields in one column (subField) */
-.div-table-cell.compound-column {
+/* Composite column styling - for stacked fields in one column (subField) */
+.div-table-cell.composite-column {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -790,9 +798,9 @@ input[type="checkbox"]:indeterminate::after {
   white-space: normal;
 }
 
-/* First child (.compound-main) renders like normal cell - no special styling */
+/* First child (.composite-main) renders like normal cell - no special styling */
 
-.compound-sub {
+.composite-sub {
   color: #6b7280;
   line-height: 1.2;
 }
@@ -840,9 +848,6 @@ input[type="checkbox"]:indeterminate::after {
   font-weight: 600;
   color: #374151;
   margin-bottom: 4px;
-}
-
-.composite-sub-header:not(:first-child) {
 }
 
 .composite-sub-header:hover {

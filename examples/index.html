@@ -315,12 +315,18 @@
             {
               field: 'name',
               label: 'Name',
-              subLabel: 'Age',
-              subField: 'age',
-              subType: 'number',
-              subRender: (value) => value ? `${value} years old` : 'Age not specified',
               responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
-              groupable: false
+              groupable: false,
+              fieldCompositeName: 'person'
+            },
+            {
+              field: 'age',
+              label: 'Age',
+              type: 'number',
+              render: (value) => value ? `${value} years old` : 'Age not specified',
+              responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
+              groupable: true,
+              fieldCompositeName: 'person'
             },
             {
               field: 'department',

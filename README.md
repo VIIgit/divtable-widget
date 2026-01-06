@@ -294,31 +294,59 @@ divTable.stopAutoFetch();
 }
 ```
 
-#### Composite Columns (Multiple Fields in One Column)
+#### Composite Cells (Multiple Fields in One Column)
+
+Use `fieldCompositeName` to stack multiple columns into a single visual cell:
 
 ```javascript
-// Stack multiple fields vertically in one column
+// Stack name and age fields vertically in one column
 {
-  field: 'firstName',
-  label: 'First Name',
-  fieldCompositeName: 'fullName'
+  field: 'name',
+  label: 'Name',
+  fieldCompositeName: 'person'
 },
 {
-  field: 'lastName',
-  label: 'Last Name',
-  fieldCompositeName: 'fullName'
+  field: 'age',
+  label: 'Age',
+  render: (value) => value ? `${value} years old` : 'Age not specified',
+  fieldCompositeName: 'person'
 }
 ```
 
-#### Compound Columns (Two-Line Headers)
+Each field in a composite cell:
+- Has its own label in the header (stacked vertically)
+- Can have its own render function
+- Can be sorted independently by clicking on its label
+- Can be grouped if `groupable: true`
+
+#### Deprecated: subLabel/subField Properties
+
+> ⚠️ **Deprecated**: The `subLabel`, `subField`, `subType`, and `subRender` properties are deprecated.
+> Please use `fieldCompositeName` instead for stacking fields in one column.
 
 ```javascript
-// Display two labels for one field (main label + sub label)
+// ❌ DEPRECATED - Do not use:
 {
-  field: 'price',
-  label: 'Product Price',
-  subLabel: 'USD',
-  subField: 'currency' // Optional: allows sorting by subField
+  field: 'name',
+  label: 'Name',
+  subLabel: 'Age',        // deprecated
+  subField: 'age',        // deprecated
+  subType: 'number',      // deprecated
+  subRender: (value) => `${value} years`  // deprecated
+}
+
+// ✅ USE THIS INSTEAD:
+{
+  field: 'name',
+  label: 'Name',
+  fieldCompositeName: 'person'
+},
+{
+  field: 'age',
+  label: 'Age',
+  type: 'number',
+  render: (value) => value ? `${value} years` : '',
+  fieldCompositeName: 'person'
 }
 ```
 
