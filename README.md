@@ -22,7 +22,7 @@ A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML 
 ## Installation
 
 ```bash
-npm install divtable-widget monaco-editor
+npm install @vii7/div-table-widget monaco-editor
 ```
 
 ## Quick Start
