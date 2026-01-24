@@ -79,6 +79,9 @@ class DivTable {
     this.autoFetchPaused = false;
     this.autoFetchTimeout = null;
     
+    // Fixed columns option (frozen left columns)
+    this.fixedColumns = options.fixedColumns || 0;
+    
     // Find primary key field first
     this.primaryKeyField = this.columns.find(col => col.primaryKey)?.field || 'id';
     
@@ -240,18 +243,122 @@ class DivTable {
     this.tableContainer.className = 'div-table-container';
     container.appendChild(this.tableContainer);
 
-    // Create header
-    this.headerContainer = document.createElement('div');
-    this.headerContainer.className = 'div-table-header';
-    this.tableContainer.appendChild(this.headerContainer);
+    // Check if we need fixed columns layout
+    if (this.fixedColumns > 0) {
+      this.tableContainer.classList.add('has-fixed-columns');
+      this.createFixedColumnsStructure();
+    } else {
+      // Standard layout without fixed columns
+      // Create header
+      this.headerContainer = document.createElement('div');
+      this.headerContainer.className = 'div-table-header';
+      this.tableContainer.appendChild(this.headerContainer);
 
-    // Create body
-    this.bodyContainer = document.createElement('div');
-    this.bodyContainer.className = 'div-table-body';
-    this.tableContainer.appendChild(this.bodyContainer);
+      // Create body
+      this.bodyContainer = document.createElement('div');
+      this.bodyContainer.className = 'div-table-body';
+      this.tableContainer.appendChild(this.bodyContainer);
+    }
 
     // Set up scroll shadow effect
     this.setupScrollShadow();
+  }
+
+  createFixedColumnsStructure() {
+    // Create wrapper for horizontal layout
+    this.columnsWrapper = document.createElement('div');
+    this.columnsWrapper.className = 'div-table-columns-wrapper';
+    this.tableContainer.appendChild(this.columnsWrapper);
+
+    // Create fixed (frozen) section
+    this.fixedSection = document.createElement('div');
+    this.fixedSection.className = 'div-table-fixed-section';
+    this.columnsWrapper.appendChild(this.fixedSection);
+
+    // Fixed header
+    this.fixedHeaderContainer = document.createElement('div');
+    this.fixedHeaderContainer.className = 'div-table-header div-table-fixed-header';
+    this.fixedSection.appendChild(this.fixedHeaderContainer);
+
+    // Fixed body
+    this.fixedBodyContainer = document.createElement('div');
+    this.fixedBodyContainer.className = 'div-table-body div-table-fixed-body';
+    this.fixedSection.appendChild(this.fixedBodyContainer);
+
+    // Create scrollable section
+    this.scrollSection = document.createElement('div');
+    this.scrollSection.className = 'div-table-scroll-section';
+    this.columnsWrapper.appendChild(this.scrollSection);
+
+    // Scrollable header
+    this.scrollHeaderContainer = document.createElement('div');
+    this.scrollHeaderContainer.className = 'div-table-header div-table-scroll-header';
+    this.scrollSection.appendChild(this.scrollHeaderContainer);
+
+    // Scrollable body
+    this.scrollBodyContainer = document.createElement('div');
+    this.scrollBodyContainer.className = 'div-table-body div-table-scroll-body';
+    this.scrollSection.appendChild(this.scrollBodyContainer);
+
+    // For compatibility, set headerContainer and bodyContainer to scrollable section
+    // (used by some methods that don't know about fixed columns)
+    this.headerContainer = this.scrollHeaderContainer;
+    this.bodyContainer = this.scrollBodyContainer;
+
+    // Set up scroll synchronization between fixed and scrollable body
+    this.setupFixedColumnsScrollSync();
+  }
+
+  setupFixedColumnsScrollSync() {
+    let isSyncingScroll = false;
+
+    // Sync vertical scroll between fixed body and scrollable body
+    // Sync horizontal scroll between scrollable body and header
+    this.scrollBodyContainer.addEventListener('scroll', () => {
+      if (isSyncingScroll) return;
+      isSyncingScroll = true;
+      
+      // Sync vertical scroll with fixed body
+      this.fixedBodyContainer.scrollTop = this.scrollBodyContainer.scrollTop;
+      
+      // Sync horizontal scroll with scroll header
+      this.scrollHeaderContainer.scrollLeft = this.scrollBodyContainer.scrollLeft;
+      
+      requestAnimationFrame(() => { isSyncingScroll = false; });
+    });
+
+    this.fixedBodyContainer.addEventListener('scroll', () => {
+      if (isSyncingScroll) return;
+      isSyncingScroll = true;
+      this.scrollBodyContainer.scrollTop = this.fixedBodyContainer.scrollTop;
+      requestAnimationFrame(() => { isSyncingScroll = false; });
+    });
+
+    // Sync horizontal scroll from header to body
+    this.scrollHeaderContainer.addEventListener('scroll', () => {
+      if (isSyncingScroll) return;
+      isSyncingScroll = true;
+      this.scrollBodyContainer.scrollLeft = this.scrollHeaderContainer.scrollLeft;
+      requestAnimationFrame(() => { isSyncingScroll = false; });
+    });
+  }
+
+  getEffectiveFixedColumnCount() {
+    // Returns the effective number of fixed columns including checkbox if enabled
+    // fixedColumns refers to the number of DATA columns to fix
+    // Checkbox is always part of the fixed section if showCheckboxes is true
+    return this.fixedColumns;
+  }
+
+  splitColumnsForFixedLayout() {
+    // Split composite columns into fixed and scrollable groups
+    const compositeColumns = this.getCompositeColumns();
+    const effectiveFixed = this.getEffectiveFixedColumnCount();
+    
+    const fixedColumns = compositeColumns.slice(0, effectiveFixed);
+    const scrollColumns = compositeColumns.slice(effectiveFixed);
+    
+    return { fixedColumns, scrollColumns };
   }
 
   createToolbarElements() {
@@ -278,11 +385,22 @@ class DivTable {
   }
 
   setupScrollShadow() {
-    this.bodyContainer.addEventListener('scroll', () => {
-      if (this.bodyContainer.scrollTop > 0) {
-        this.headerContainer.classList.add('scrolled');
+    // For fixed columns layout, use the scroll body container
+    const scrollContainer = this.fixedColumns > 0 ? this.scrollBodyContainer : this.bodyContainer;
+    const headerContainer = this.fixedColumns > 0 ? this.scrollHeaderContainer : this.headerContainer;
+    
+    scrollContainer.addEventListener('scroll', () => {
+      if (scrollContainer.scrollTop > 0) {
+        headerContainer.classList.add('scrolled');
+        // Also update fixed header if present
+        if (this.fixedColumns > 0 && this.fixedHeaderContainer) {
+          this.fixedHeaderContainer.classList.add('scrolled');
+        }
       } else {
-        this.headerContainer.classList.remove('scrolled');
+        headerContainer.classList.remove('scrolled');
+        if (this.fixedColumns > 0 && this.fixedHeaderContainer) {
+          this.fixedHeaderContainer.classList.remove('scrolled');
+        }
       }
       
       // Handle virtual scrolling if enabled
@@ -585,11 +703,14 @@ class DivTable {
   }
 
   setupKeyboardNavigation() {
-    this.bodyContainer.addEventListener('keydown', (e) => {
+    // For fixed columns, use fixed body container for keyboard events
+    const bodyContainer = this.fixedColumns > 0 ? this.fixedBodyContainer : this.bodyContainer;
+    
+    bodyContainer.addEventListener('keydown', (e) => {
       this.handleKeyDown(e);
     });
 
-    this.bodyContainer.addEventListener('focus', () => {
+    bodyContainer.addEventListener('focus', () => {
       if (!this.focusedRowId) {
         this.focusFirstRecord();
       }
@@ -669,8 +790,11 @@ class DivTable {
 
   getAllFocusableElements() {
     // Get all elements that can receive focus (checkboxes or rows)
+    // For fixed columns layout, use fixed body container
+    const bodyContainer = this.fixedColumns > 0 ? this.fixedBodyContainer : this.bodyContainer;
+    
     const focusableElements = [];
-    const allRows = Array.from(this.bodyContainer.querySelectorAll('.div-table-row'));
+    const allRows = Array.from(bodyContainer.querySelectorAll('.div-table-row'));
     
     for (const row of allRows) {
       if (row.classList.contains('group-header')) {
@@ -720,12 +844,33 @@ class DivTable {
   }
 
   updateFocusState(row) {
-    // Clear previous focus classes
-    const previousFocused = this.bodyContainer.querySelectorAll('.div-table-row.focused');
-    previousFocused.forEach(r => r.classList.remove('focused'));
-    
-    // Set new focus
-    row.classList.add('focused');
+    // Clear previous focus classes from both containers if using fixed columns
+    if (this.fixedColumns > 0) {
+      this.fixedBodyContainer.querySelectorAll('.div-table-row.focused').forEach(r => r.classList.remove('focused'));
+      this.scrollBodyContainer.querySelectorAll('.div-table-row.focused').forEach(r => r.classList.remove('focused'));
+      
+      // Set focus on both parts if this is a split row
+      row.classList.add('focused');
+      
+      // Find and focus the corresponding row in the other container
+      const rowId = row.dataset.id || row.dataset.groupKey;
+      if (rowId) {
+        const selector = row.dataset.id ? `[data-id="${rowId}"]` : `[data-group-key="${rowId}"]`;
+        if (row.closest('.div-table-fixed-body')) {
+          const scrollRow = this.scrollBodyContainer.querySelector(selector);
+          if (scrollRow) scrollRow.classList.add('focused');
+        } else if (row.closest('.div-table-scroll-body')) {
+          const fixedRow = this.fixedBodyContainer.querySelector(selector);
+          if (fixedRow) fixedRow.classList.add('focused');
+        }
+      }
+    } else {
+      // Standard single-container focus
+      const previousFocused = this.bodyContainer.querySelectorAll('.div-table-row.focused');
+      previousFocused.forEach(r => r.classList.remove('focused'));
+      
+      row.classList.add('focused');
+    }
     
     if (row.classList.contains('group-header')) {
       this.focusedRowId = null;
@@ -831,12 +976,15 @@ class DivTable {
   }
 
   getVisibleRows() {
-    return Array.from(this.bodyContainer.querySelectorAll('.div-table-row[data-id]:not(.group-header):not(.group-collapsed)'));
+    const bodyContainer = this.fixedColumns > 0 ? this.fixedBodyContainer : this.bodyContainer;
+    return Array.from(bodyContainer.querySelectorAll('.div-table-row[data-id]:not(.group-header):not(.group-collapsed)'));
   }
 
   getAllFocusableRows() {
     // Include group headers and data rows, but exclude rows from collapsed groups
-    const allRows = Array.from(this.bodyContainer.querySelectorAll('.div-table-row'));
+    // For fixed columns, use fixed body container
+    const bodyContainer = this.fixedColumns > 0 ? this.fixedBodyContainer : this.bodyContainer;
+    const allRows = Array.from(bodyContainer.querySelectorAll('.div-table-row'));
     const focusableRows = [];
     
     for (const row of allRows) {
@@ -1094,13 +1242,27 @@ class DivTable {
   }
 
   updateCheckboxes() {
-    this.bodyContainer.querySelectorAll('.div-table-row[data-id] input[type="checkbox"]').forEach(checkbox => {
-      const rowId = checkbox.closest('.div-table-row').dataset.id;
-      checkbox.checked = this.selectedRows.has(rowId);
-    });
+    // Handle fixed columns layout
+    if (this.fixedColumns > 0) {
+      this.fixedBodyContainer.querySelectorAll('.div-table-row[data-id] input[type="checkbox"]').forEach(checkbox => {
+        const rowId = checkbox.closest('.div-table-row').dataset.id;
+        checkbox.checked = this.selectedRows.has(rowId);
+      });
+    } else {
+      this.bodyContainer.querySelectorAll('.div-table-row[data-id] input[type="checkbox"]').forEach(checkbox => {
+        const rowId = checkbox.closest('.div-table-row').dataset.id;
+        checkbox.checked = this.selectedRows.has(rowId);
+      });
+    }
   }
 
   updateSelectionStates() {
+    // Handle fixed columns layout
+    if (this.fixedColumns > 0) {
+      this.updateSelectionStatesWithFixedColumns();
+      return;
+    }
+    
     // Update individual row selection states
     this.bodyContainer.querySelectorAll('.div-table-row[data-id]').forEach(row => {
       const rowId = row.dataset.id;
@@ -1149,8 +1311,72 @@ class DivTable {
     this.updateHeaderCheckbox();
   }
 
+  updateSelectionStatesWithFixedColumns() {
+    // Update rows in fixed body container
+    this.fixedBodyContainer.querySelectorAll('.div-table-row[data-id]').forEach(row => {
+      const rowId = row.dataset.id;
+      const checkbox = row.querySelector('input[type="checkbox"]');
+      
+      if (this.selectedRows.has(rowId)) {
+        row.classList.add('selected');
+        if (checkbox) checkbox.checked = true;
+      } else {
+        row.classList.remove('selected');
+        if (checkbox) checkbox.checked = false;
+      }
+    });
+    
+    // Update corresponding rows in scroll body container
+    this.scrollBodyContainer.querySelectorAll('.div-table-row[data-id]').forEach(row => {
+      const rowId = row.dataset.id;
+      
+      if (this.selectedRows.has(rowId)) {
+        row.classList.add('selected');
+      } else {
+        row.classList.remove('selected');
+      }
+    });
+    
+    // Update group header checkbox states
+    if (this.groupByField) {
+      const groups = this.groupData(this.sortData(this.filteredData));
+      
+      this.fixedBodyContainer.querySelectorAll('.div-table-row.group-header').forEach((groupRow) => {
+        const checkbox = groupRow.querySelector('input[type="checkbox"]');
+        if (!checkbox) return;
+
+        const groupKey = groupRow.dataset.groupKey;
+        const group = groups.find(g => g.key === groupKey);
+        if (!group) return;
+
+        const groupItemIds = group.items.map(item => String(item[this.primaryKeyField]));
+        const selectedInGroup = groupItemIds.filter(id => this.selectedRows.has(id));
+
+        if (selectedInGroup.length === 0) {
+          checkbox.checked = false;
+          checkbox.indeterminate = false;
+        } else if (selectedInGroup.length === groupItemIds.length) {
+          checkbox.checked = true;
+          checkbox.indeterminate = false;
+        } else {
+          checkbox.checked = false;
+          checkbox.indeterminate = true;
+        }
+      });
+    }
+
+    // Update main header checkbox state
+    this.updateHeaderCheckbox();
+  }
+
   updateHeaderCheckbox() {
-    const headerCheckbox = this.headerContainer.querySelector('input[type="checkbox"]');
+    // Find header checkbox - in fixed header for fixed columns layout, otherwise in regular header
+    let headerCheckbox;
+    if (this.fixedColumns > 0) {
+      headerCheckbox = this.fixedHeaderContainer.querySelector('input[type="checkbox"]');
+    } else {
+      headerCheckbox = this.headerContainer.querySelector('input[type="checkbox"]');
+    }
     if (!headerCheckbox) return;
 
     const totalItems = this.filteredData.length;
@@ -1171,8 +1397,11 @@ class DivTable {
   }
 
   updateTabIndexes() {
+    // Handle fixed columns layout
+    const bodyContainer = this.fixedColumns > 0 ? this.fixedBodyContainer : this.bodyContainer;
+    
     // Update tabindex for checkboxes only, not rows
-    const allRows = Array.from(this.bodyContainer.querySelectorAll('.div-table-row'));
+    const allRows = Array.from(bodyContainer.querySelectorAll('.div-table-row'));
     
     for (const row of allRows) {
       if (row.classList.contains('group-header')) {
@@ -1213,6 +1442,12 @@ class DivTable {
   }
 
   renderHeader() {
+    // Handle fixed columns layout
+    if (this.fixedColumns > 0) {
+      this.renderHeaderWithFixedColumns();
+      return;
+    }
+    
     this.headerContainer.innerHTML = '';
     
     const compositeColumns = this.getCompositeColumns();
@@ -1301,6 +1536,241 @@ class DivTable {
     
     // Add scrollbar spacer if body has a scrollbar
     this.updateScrollbarSpacer();
+  }
+
+  renderHeaderWithFixedColumns() {
+    this.fixedHeaderContainer.innerHTML = '';
+    this.scrollHeaderContainer.innerHTML = '';
+    
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    
+    // Build grid template for fixed section
+    let fixedGridTemplate = '';
+    if (this.showCheckboxes) {
+      fixedGridTemplate = '40px '; // Checkbox column always in fixed section
+    }
+    
+    fixedColumns.forEach(composite => {
+      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    
+    this.fixedHeaderContainer.style.gridTemplateColumns = fixedGridTemplate.trim();
+    
+    // Build grid template for scrollable section - use inner wrapper for scrolling
+    let scrollGridTemplate = '';
+    scrollColumns.forEach(composite => {
+      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    
+    // Create inner wrapper for scroll header content
+    this.scrollHeaderInner = document.createElement('div');
+    this.scrollHeaderInner.className = 'div-table-scroll-header-inner';
+    this.scrollHeaderInner.style.gridTemplateColumns = scrollGridTemplate.trim();
+    this.scrollHeaderContainer.appendChild(this.scrollHeaderInner);
+    
+    // Render checkbox in fixed header
+    if (this.showCheckboxes) {
+      const checkboxCell = document.createElement('div');
+      checkboxCell.className = 'div-table-header-cell checkbox-column';
+      
+      if (this.multiSelect) {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.addEventListener('change', (e) => {
+          if (e.target.checked || e.target.indeterminate) {
+            this.selectAll();
+          } else {
+            this.clearSelection();
+            if (this.showOnlySelected) {
+              this.renderBody();
+              this.updateInfoSection();
+            }
+          }
+        });
+        checkboxCell.appendChild(checkbox);
+      }
+      
+      this.fixedHeaderContainer.appendChild(checkboxCell);
+    }
+    
+    // Render fixed column headers
+    fixedColumns.forEach(composite => {
+      const headerCell = this.createHeaderCell(composite);
+      this.fixedHeaderContainer.appendChild(headerCell);
+    });
+    
+    // Render scrollable column headers
+    scrollColumns.forEach(composite => {
+      const headerCell = this.createHeaderCell(composite);
+      this.scrollHeaderInner.appendChild(headerCell);
+    });
+    
+    // Synchronize header heights
+    this.syncFixedColumnsHeaderHeights();
+  }
+  
+  syncFixedColumnsHeaderHeights() {
+    if (!this.fixedColumns || this.fixedColumns <= 0) return;
+    if (!this.fixedHeaderContainer || !this.scrollHeaderContainer) return;
+    
+    // Reset heights first
+    this.fixedHeaderContainer.style.height = '';
+    this.scrollHeaderContainer.style.height = '';
+    
+    // Get natural heights
+    const fixedHeight = this.fixedHeaderContainer.offsetHeight;
+    const scrollHeight = this.scrollHeaderContainer.offsetHeight;
+    
+    // Set both to the maximum height
+    const maxHeight = Math.max(fixedHeight, scrollHeight);
+    if (maxHeight > 0) {
+      this.fixedHeaderContainer.style.height = `${maxHeight}px`;
+      this.scrollHeaderContainer.style.height = `${maxHeight}px`;
+    }
+  }
+  
+  syncFixedColumnsRowHeights() {
+    if (!this.fixedColumns || this.fixedColumns <= 0) return;
+    if (!this.fixedBodyContainer || !this.scrollBodyContainer) return;
+    
+    const fixedRows = this.fixedBodyContainer.querySelectorAll('.div-table-row');
+    const scrollRows = this.scrollBodyContainer.querySelectorAll('.div-table-row');
+    
+    if (fixedRows.length !== scrollRows.length) return;
+    
+    fixedRows.forEach((fixedRow, index) => {
+      const scrollRow = scrollRows[index];
+      if (!scrollRow) return;
+      
+      // Reset heights first
+      fixedRow.style.height = '';
+      scrollRow.style.height = '';
+      
+      // Get natural heights
+      const fixedHeight = fixedRow.offsetHeight;
+      const scrollHeight = scrollRow.offsetHeight;
+      
+      // Set both to the maximum height
+      const maxHeight = Math.max(fixedHeight, scrollHeight);
+      if (maxHeight > 0) {
+        fixedRow.style.height = `${maxHeight}px`;
+        scrollRow.style.height = `${maxHeight}px`;
+      }
+    });
+  }
+  
+  syncFixedColumnsColumnWidths() {
+    if (!this.fixedColumns || this.fixedColumns <= 0) return;
+    if (!this.scrollHeaderInner || !this.scrollBodyContainer) return;
+    
+    const { scrollColumns } = this.splitColumnsForFixedLayout();
+    const numColumns = scrollColumns.length;
+    if (numColumns === 0) return;
+    
+    // Collect all cells for each column position
+    const headerCells = Array.from(this.scrollHeaderInner.querySelectorAll('.div-table-header-cell'));
+    const bodyRows = Array.from(this.scrollBodyContainer.querySelectorAll('.div-table-row:not(.group-header)'));
+    
+    // Calculate max width for each column
+    const columnWidths = [];
+    
+    for (let colIndex = 0; colIndex < numColumns; colIndex++) {
+      let maxWidth = 0;
+      
+      // Check header cell
+      if (headerCells[colIndex]) {
+        // Reset any previously set width
+        headerCells[colIndex].style.minWidth = '';
+        headerCells[colIndex].style.width = '';
+        maxWidth = Math.max(maxWidth, headerCells[colIndex].scrollWidth);
+      }
+      
+      // Check all body row cells
+      bodyRows.forEach(row => {
+        const cells = row.querySelectorAll('.div-table-cell');
+        if (cells[colIndex]) {
+          // Reset any previously set width
+          cells[colIndex].style.minWidth = '';
+          cells[colIndex].style.width = '';
+          maxWidth = Math.max(maxWidth, cells[colIndex].scrollWidth);
+        }
+      });
+      
+      // Add some padding for comfortable reading
+      columnWidths.push(maxWidth + 4);
+    }
+    
+    // Apply calculated widths to all cells
+    // Build grid template from calculated widths
+    const gridTemplate = columnWidths.map(w => `${w}px`).join(' ');
+    const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+    
+    // Apply to header inner wrapper
+    this.scrollHeaderInner.style.gridTemplateColumns = gridTemplate;
+    
+    // Apply to all body rows (including group headers need special handling)
+    const allRows = this.scrollBodyContainer.querySelectorAll('.div-table-row');
+    allRows.forEach(row => {
+      if (row.classList.contains('group-header')) {
+        // Group headers span all columns - set explicit width to match total
+        row.style.gridTemplateColumns = '1fr';
+        row.style.minWidth = `${totalWidth}px`;
+      } else {
+        row.style.gridTemplateColumns = gridTemplate;
+      }
+    });
+    
+    // Update shadow visibility based on whether horizontal scrolling is needed
+    this.updateFixedColumnsShadow();
+  }
+  
+  updateFixedColumnsShadow() {
+    if (!this.fixedColumns || this.fixedColumns <= 0) return;
+    if (!this.scrollBodyContainer || !this.fixedSection) return;
+    
+    // Check if horizontal scrolling is needed
+    const hasHorizontalScroll = this.scrollBodyContainer.scrollWidth > this.scrollBodyContainer.clientWidth;
+    
+    if (hasHorizontalScroll) {
+      this.fixedSection.classList.add('has-scroll-shadow');
+    } else {
+      this.fixedSection.classList.remove('has-scroll-shadow');
+    }
+  }
+
+  getColumnGridSize(composite) {
+    const firstCol = composite.columns[0];
+    const responsive = firstCol.responsive || {};
+    switch (responsive.size) {
+      case 'fixed-narrow':
+        return '80px';
+      case 'fixed-medium':
+        return '120px';
+      case 'flexible-small':
+        return '1fr';
+      case 'flexible-medium':
+        return '2fr';
+      case 'flexible-large':
+        return '3fr';
+      default:
+        return '1fr';
+    }
+  }
+
+  createHeaderCell(composite) {
+    const headerCell = document.createElement('div');
+    headerCell.className = 'div-table-header-cell';
+    
+    if (composite.compositeName) {
+      headerCell.classList.add('composite-header');
+      this.renderCompositeHeaderCell(headerCell, composite);
+    } else {
+      headerCell.classList.add('sortable');
+      const col = composite.columns[0];
+      this.renderSingleHeaderCell(headerCell, col);
+    }
+    
+    return headerCell;
   }
   
   updateScrollbarSpacer() {
@@ -1769,6 +2239,12 @@ class DivTable {
   }
 
   renderBody() {
+    // Handle fixed columns layout
+    if (this.fixedColumns > 0) {
+      this.renderBodyWithFixedColumns();
+      return;
+    }
+    
     this.bodyContainer.innerHTML = '';
 
     // Show loading placeholders if in loading state
@@ -1810,6 +2286,111 @@ class DivTable {
     }
   }
 
+  renderBodyWithFixedColumns() {
+    this.fixedBodyContainer.innerHTML = '';
+    this.scrollBodyContainer.innerHTML = '';
+
+    // Show loading placeholders if in loading state
+    if (this.isLoadingState) {
+      this.showLoadingPlaceholders();
+      return;
+    }
+
+    // Apply selection filter on top of existing filters
+    let dataToRender = this.filteredData;
+    
+    if (this.showOnlySelected && this.selectedRows.size === 0) {
+      this.showOnlySelected = false;
+    }
+    
+    if (this.showOnlySelected && this.selectedRows.size > 0) {
+      dataToRender = this.filteredData.filter(item => {
+        const itemId = String(item[this.primaryKeyField]);
+        return this.selectedRows.has(itemId);
+      });
+    }
+
+    if (dataToRender.length === 0) {
+      const emptyState = document.createElement('div');
+      emptyState.className = 'div-table-empty';
+      emptyState.textContent = this.showOnlySelected && this.selectedRows.size > 0 
+        ? 'No selected rows match current filters'
+        : 'No data to display';
+      // Span empty state across both sections
+      this.fixedBodyContainer.appendChild(emptyState);
+      return;
+    }
+
+    if (this.groupByField) {
+      this.renderGroupedRowsWithFixedColumns(dataToRender);
+    } else {
+      this.renderRegularRowsWithFixedColumns(dataToRender);
+    }
+    
+    // Synchronize column widths in scroll section (must be done before row heights)
+    this.syncFixedColumnsColumnWidths();
+    
+    // Synchronize row heights between fixed and scroll sections
+    this.syncFixedColumnsRowHeights();
+  }
+
+  renderRegularRowsWithFixedColumns(dataToRender = this.filteredData) {
+    const sortedData = this.sortData(dataToRender);
+    
+    sortedData.forEach(item => {
+      const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
+      this.fixedBodyContainer.appendChild(fixedRow);
+      this.scrollBodyContainer.appendChild(scrollRow);
+    });
+  }
+
+  renderGroupedRowsWithFixedColumns(dataToRender = this.filteredData) {
+    let groups = this.groupData(dataToRender);
+    
+    // If sorting by the grouped column, sort the groups themselves
+    if (this.sortColumn === this.groupByField) {
+      groups = groups.sort((a, b) => {
+        if (this.sortMode === 'count') {
+          const countDiff = a.items.length - b.items.length;
+          return this.sortDirection === 'desc' ? -countDiff : countDiff;
+        } else {
+          if (a.value == null && b.value == null) return 0;
+          if (a.value == null) return this.sortDirection === 'asc' ? -1 : 1;
+          if (b.value == null) return this.sortDirection === 'asc' ? 1 : -1;
+          
+          let result = 0;
+          if (typeof a.value === 'number' && typeof b.value === 'number') {
+            result = a.value - b.value;
+          } else {
+            result = String(a.value).localeCompare(String(b.value));
+          }
+          
+          return this.sortDirection === 'desc' ? -result : result;
+        }
+      });
+    }
+    
+    groups.forEach(group => {
+      if (this.sortColumn !== this.groupByField) {
+        group.items = this.sortData(group.items);
+      }
+      
+      // Group header spans both sections
+      const { fixedGroupHeader, scrollGroupHeader } = this.createGroupHeaderWithFixedColumns(group);
+      this.fixedBodyContainer.appendChild(fixedGroupHeader);
+      this.scrollBodyContainer.appendChild(scrollGroupHeader);
+      
+      // Group rows (if not collapsed)
+      if (!this.collapsedGroups.has(group.key)) {
+        group.items.forEach(item => {
+          const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
+          this.fixedBodyContainer.appendChild(fixedRow);
+          this.scrollBodyContainer.appendChild(scrollRow);
+        });
+      }
+    });
+  }
+
   renderRegularRows(dataToRender = this.filteredData) {
     const sortedData = this.sortData(dataToRender);
     
@@ -1826,16 +2407,10 @@ class DivTable {
     if (this.sortColumn === this.groupByField) {
       groups = groups.sort((a, b) => {
         if (this.sortMode === 'count') {
-          // Sort by item count
           const countDiff = a.items.length - b.items.length;
           return this.sortDirection === 'desc' ? -countDiff : countDiff;
         } else {
-          // Sort by value (alphabetically)
           if (a.value == null && b.value == null) return 0;
-          
-          // For undefined/null values in group sorting:
-          // - In ASC: nulls go to top (return -1 for null a, 1 for null b)  
-          // - In DESC: nulls go to bottom (return 1 for null a, -1 for null b)
           if (a.value == null) return this.sortDirection === 'asc' ? -1 : 1;
           if (b.value == null) return this.sortDirection === 'asc' ? 1 : -1;
           
@@ -1850,7 +2425,7 @@ class DivTable {
         }
       });
     }
-    
+
     groups.forEach(group => {
       // Sort items within each group (unless sorting by grouped column, then no need to sort items)
       if (this.sortColumn !== this.groupByField) {
@@ -2150,6 +2725,477 @@ class DivTable {
     });
 
     return row;
+  }
+
+  createRowWithFixedColumns(item) {
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const rowId = String(item[this.primaryKeyField]);
+    
+    // Create fixed row part
+    const fixedRow = document.createElement('div');
+    fixedRow.className = 'div-table-row div-table-fixed-row';
+    fixedRow.dataset.id = rowId;
+    
+    // Build grid template for fixed row
+    let fixedGridTemplate = '';
+    if (this.showCheckboxes) {
+      fixedGridTemplate = '40px ';
+    }
+    fixedColumns.forEach(composite => {
+      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    fixedRow.style.gridTemplateColumns = fixedGridTemplate.trim();
+    
+    // Create scrollable row part
+    const scrollRow = document.createElement('div');
+    scrollRow.className = 'div-table-row div-table-scroll-row';
+    scrollRow.dataset.id = rowId;
+    
+    // Build grid template for scrollable row
+    let scrollGridTemplate = '';
+    scrollColumns.forEach(composite => {
+      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    scrollRow.style.gridTemplateColumns = scrollGridTemplate.trim();
+    
+    // Apply selection state to both row parts
+    if (this.selectedRows.has(rowId)) {
+      fixedRow.classList.add('selected');
+      scrollRow.classList.add('selected');
+    }
+    if (this.focusedRowId === rowId) {
+      fixedRow.classList.add('focused');
+      scrollRow.classList.add('focused');
+    }
+    
+    // Checkbox column (in fixed row only)
+    if (this.showCheckboxes) {
+      const checkboxCell = document.createElement('div');
+      checkboxCell.className = 'div-table-cell checkbox-column';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = this.selectedRows.has(rowId);
+      
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        
+        const rowData = this.findRowData(rowId);
+        if (!rowData) {
+          console.warn('DivTable: Could not find data for row ID:', rowId);
+          return;
+        }
+        
+        if (checkbox.checked) {
+          if (!this.multiSelect) this.clearSelection();
+          this.selectedRows.add(rowId);
+          rowData.selected = true;
+          fixedRow.classList.add('selected');
+          scrollRow.classList.add('selected');
+        } else {
+          this.selectedRows.delete(rowId);
+          rowData.selected = false;
+          fixedRow.classList.remove('selected');
+          scrollRow.classList.remove('selected');
+          
+          if (this.showOnlySelected) {
+            this.renderBody();
+            this.updateInfoSection();
+            
+            const selectedData = Array.from(this.selectedRows)
+              .map(id => this.findRowData(id))
+              .filter(Boolean);
+            
+            if (typeof this.onSelectionChange === 'function') {
+              this.onSelectionChange(selectedData);
+            }
+            return;
+          }
+        }
+        
+        this.updateSelectionStates();
+        this.updateInfoSection();
+        
+        const selectedData = Array.from(this.selectedRows)
+          .map(id => this.findRowData(id))
+          .filter(Boolean);
+        
+        if (typeof this.onSelectionChange === 'function') {
+          this.onSelectionChange(selectedData);
+        }
+      });
+      
+      checkbox.addEventListener('focus', (e) => {
+        this.updateFocusStateForFixedRows(fixedRow, scrollRow);
+      });
+      
+      checkboxCell.appendChild(checkbox);
+      
+      checkboxCell.addEventListener('click', (e) => {
+        if (e.target === checkbox) return;
+        e.stopPropagation();
+        checkbox.click();
+      });
+      
+      fixedRow.appendChild(checkboxCell);
+    }
+    
+    // Render fixed columns
+    fixedColumns.forEach(composite => {
+      const cell = this.createCellForComposite(composite, item);
+      fixedRow.appendChild(cell);
+    });
+    
+    // Render scrollable columns
+    scrollColumns.forEach(composite => {
+      const cell = this.createCellForComposite(composite, item);
+      scrollRow.appendChild(cell);
+    });
+    
+    // Row click handlers for both parts
+    const handleRowClick = (e, targetRow) => {
+      if (e.target.closest('.checkbox-column')) return;
+      
+      const selection = window.getSelection();
+      if (selection.toString().length > 0) return;
+      
+      const focusableElement = this.getFocusableElementForRow(fixedRow);
+      if (focusableElement) {
+        const focusableElements = this.getAllFocusableElements();
+        const focusIndex = focusableElements.indexOf(focusableElement);
+        if (focusIndex !== -1) {
+          this.focusElementAtIndex(focusIndex);
+        }
+      }
+    };
+    
+    fixedRow.addEventListener('click', (e) => handleRowClick(e, fixedRow));
+    scrollRow.addEventListener('click', (e) => handleRowClick(e, scrollRow));
+    
+    // Sync hover state between row parts
+    fixedRow.addEventListener('mouseenter', () => {
+      scrollRow.classList.add('hover');
+    });
+    fixedRow.addEventListener('mouseleave', () => {
+      scrollRow.classList.remove('hover');
+    });
+    scrollRow.addEventListener('mouseenter', () => {
+      fixedRow.classList.add('hover');
+    });
+    scrollRow.addEventListener('mouseleave', () => {
+      fixedRow.classList.remove('hover');
+    });
+    
+    return { fixedRow, scrollRow };
+  }
+
+  updateFocusStateForFixedRows(fixedRow, scrollRow) {
+    // Clear previous focus classes in both containers
+    this.fixedBodyContainer.querySelectorAll('.div-table-row.focused').forEach(r => r.classList.remove('focused'));
+    this.scrollBodyContainer.querySelectorAll('.div-table-row.focused').forEach(r => r.classList.remove('focused'));
+    
+    // Set focus on both parts
+    fixedRow.classList.add('focused');
+    scrollRow.classList.add('focused');
+    
+    const rowId = fixedRow.dataset.id;
+    if (rowId) {
+      this.focusedRowId = rowId;
+      
+      if (this._lastFocusCallback.rowId !== rowId) {
+        this._lastFocusCallback = { rowId: rowId, groupKey: null };
+        const rowData = this.findRowData(rowId);
+        this.onRowFocus(rowData);
+      }
+    }
+  }
+
+  createCellForComposite(composite, item) {
+    const cell = document.createElement('div');
+    cell.className = 'div-table-cell';
+    
+    if (composite.compositeName) {
+      // Composite cell with multiple columns stacked vertically
+      cell.classList.add('composite-cell');
+      cell.style.display = 'flex';
+      cell.style.flexDirection = 'column';
+      cell.style.gap = '4px';
+      
+      composite.columns.forEach((col, index) => {
+        const subCell = document.createElement('div');
+        subCell.className = 'composite-sub-cell';
+        
+        if (this.groupByField && col.field === this.groupByField) {
+          subCell.classList.add('grouped-column');
+          subCell.textContent = '';
+        } else {
+          if (col.subField) {
+            subCell.classList.add('composite-column');
+            subCell.style.display = 'flex';
+            subCell.style.flexDirection = 'column';
+            subCell.style.gap = '2px';
+            
+            const mainDiv = document.createElement('div');
+            mainDiv.className = 'composite-main';
+            if (typeof col.render === 'function') {
+              mainDiv.innerHTML = col.render(item[col.field], item);
+            } else {
+              mainDiv.innerHTML = item[col.field] ?? '';
+            }
+            
+            const subDiv = document.createElement('div');
+            subDiv.className = 'composite-sub';
+            if (typeof col.subRender === 'function') {
+              subDiv.innerHTML = col.subRender(item[col.subField], item);
+            } else {
+              subDiv.innerHTML = item[col.subField] ?? '';
+            }
+            
+            subCell.appendChild(mainDiv);
+            subCell.appendChild(subDiv);
+          } else {
+            if (typeof col.render === 'function') {
+              subCell.innerHTML = col.render(item[col.field], item);
+            } else {
+              subCell.innerHTML = item[col.field] ?? '';
+            }
+          }
+        }
+        
+        cell.appendChild(subCell);
+      });
+    } else {
+      // Single column
+      const col = composite.columns[0];
+      
+      if (this.groupByField && col.field === this.groupByField) {
+        cell.classList.add('grouped-column');
+        cell.textContent = '';
+      } else {
+        if (col.subField) {
+          cell.classList.add('composite-column');
+          
+          const mainDiv = document.createElement('div');
+          mainDiv.className = 'composite-main';
+          if (typeof col.render === 'function') {
+            mainDiv.innerHTML = col.render(item[col.field], item);
+          } else {
+            mainDiv.innerHTML = item[col.field] ?? '';
+          }
+          
+          const subDiv = document.createElement('div');
+          subDiv.className = 'composite-sub';
+          if (typeof col.subRender === 'function') {
+            subDiv.innerHTML = col.subRender(item[col.subField], item);
+          } else {
+            subDiv.innerHTML = item[col.subField] ?? '';
+          }
+          
+          cell.appendChild(mainDiv);
+          cell.appendChild(subDiv);
+        } else {
+          if (typeof col.render === 'function') {
+            cell.innerHTML = col.render(item[col.field], item);
+          } else {
+            cell.innerHTML = item[col.field] ?? '';
+          }
+        }
+      }
+    }
+    
+    return cell;
+  }
+
+  createGroupHeaderWithFixedColumns(group) {
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    
+    // Create fixed group header part
+    const fixedGroupHeader = document.createElement('div');
+    fixedGroupHeader.className = 'div-table-row group-header div-table-fixed-row';
+    fixedGroupHeader.dataset.groupKey = group.key;
+    
+    // Build grid template for fixed section
+    let fixedGridTemplate = '';
+    if (this.showCheckboxes) {
+      fixedGridTemplate = '40px ';
+    }
+    fixedColumns.forEach(composite => {
+      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    fixedGroupHeader.style.gridTemplateColumns = fixedGridTemplate.trim();
+    
+    // Create scrollable group header part
+    const scrollGroupHeader = document.createElement('div');
+    scrollGroupHeader.className = 'div-table-row group-header div-table-scroll-row';
+    scrollGroupHeader.dataset.groupKey = group.key;
+    
+    // Build grid template for scrollable section
+    let scrollGridTemplate = '';
+    scrollColumns.forEach(composite => {
+      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    scrollGroupHeader.style.gridTemplateColumns = scrollGridTemplate.trim();
+    
+    if (this.collapsedGroups.has(group.key)) {
+      fixedGroupHeader.classList.add('collapsed');
+      scrollGroupHeader.classList.add('collapsed');
+    }
+    
+    // Checkbox column for group (in fixed section only)
+    if (this.showCheckboxes) {
+      const checkboxCell = document.createElement('div');
+      checkboxCell.className = 'div-table-cell checkbox-column';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      
+      const groupItemIds = group.items.map(item => String(item[this.primaryKeyField]));
+      const selectedInGroup = groupItemIds.filter(id => this.selectedRows.has(id));
+      
+      if (selectedInGroup.length === 0) {
+        checkbox.checked = false;
+        checkbox.indeterminate = false;
+      } else if (selectedInGroup.length === groupItemIds.length) {
+        checkbox.checked = true;
+        checkbox.indeterminate = false;
+      } else {
+        checkbox.checked = false;
+        checkbox.indeterminate = true;
+      }
+      
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        
+        const currentlySelectedInGroup = groupItemIds.filter(id => this.selectedRows.has(id)).length;
+        const shouldSelect = currentlySelectedInGroup === 0;
+        
+        group.items.forEach(item => {
+          const itemId = String(item[this.primaryKeyField]);
+          if (shouldSelect) {
+            this.selectedRows.add(itemId);
+            item.selected = true;
+          } else {
+            this.selectedRows.delete(itemId);
+            item.selected = false;
+          }
+        });
+        
+        if (this.showOnlySelected) {
+          this.renderBody();
+          this.updateInfoSection();
+          
+          if (typeof this.onSelectionChange === 'function') {
+            this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+          }
+          return;
+        }
+        
+        this.updateSelectionStates();
+        this.updateInfoSection();
+        
+        if (typeof this.onSelectionChange === 'function') {
+          this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+        }
+      });
+      
+      checkbox.addEventListener('focus', (e) => {
+        this.updateFocusStateForFixedRows(fixedGroupHeader, scrollGroupHeader);
+      });
+      
+      checkboxCell.appendChild(checkbox);
+      fixedGroupHeader.appendChild(checkboxCell);
+    }
+    
+    // Group label cell spans remaining fixed columns
+    const fixedLabelCell = document.createElement('div');
+    fixedLabelCell.className = 'div-table-cell';
+    fixedLabelCell.style.gridColumn = this.showCheckboxes ? '2 / -1' : '1 / -1';
+    fixedLabelCell.style.display = 'flex';
+    fixedLabelCell.style.alignItems = 'center';
+    fixedLabelCell.style.gap = '8px';
+    
+    // Individual group toggle button
+    const toggleBtn = document.createElement('span');
+    toggleBtn.className = 'group-toggle';
+    if (this.collapsedGroups.has(group.key)) {
+      toggleBtn.classList.add('collapsed');
+    }
+    toggleBtn.textContent = '❯';
+    toggleBtn.title = this.collapsedGroups.has(group.key) ? 'Expand group' : 'Collapse group';
+    
+    const groupColumn = this.columns.find(col => col.field === this.groupByField);
+    const groupLabel = groupColumn?.label || this.groupByField;
+    
+    let renderedGroupValue;
+    if (group.value == null || group.value === '') {
+      renderedGroupValue = `${groupLabel} is undefined`;
+    } else if (groupColumn && typeof groupColumn.render === 'function') {
+      renderedGroupValue = groupColumn.render(group.value, null);
+    } else {
+      renderedGroupValue = group.value;
+    }
+    
+    fixedLabelCell.appendChild(toggleBtn);
+    
+    const textSpan = document.createElement('span');
+    if (typeof renderedGroupValue === 'string') {
+      textSpan.innerHTML = renderedGroupValue;
+    } else {
+      textSpan.textContent = renderedGroupValue;
+    }
+    fixedLabelCell.appendChild(textSpan);
+    
+    const countSpan = document.createElement('span');
+    countSpan.className = 'group-item-count';
+    countSpan.innerHTML = `(${group.items.length})`;
+    countSpan.style.opacity = '0.8';
+    countSpan.style.fontSize = '0.9em';
+    countSpan.style.fontWeight = 'normal';
+    countSpan.title = `${group.items.length} item${group.items.length === 1 ? '' : 's'} in this group`;
+    fixedLabelCell.appendChild(countSpan);
+    
+    fixedGroupHeader.appendChild(fixedLabelCell);
+    
+    // Scrollable section gets an empty spanning cell
+    const scrollLabelCell = document.createElement('div');
+    scrollLabelCell.className = 'div-table-cell';
+    scrollLabelCell.style.gridColumn = '1 / -1';
+    scrollGroupHeader.appendChild(scrollLabelCell);
+    
+    // Group toggle click handler
+    const handleToggleClick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
+      if (this.collapsedGroups.has(group.key)) {
+        this.collapsedGroups.delete(group.key);
+        fixedGroupHeader.classList.remove('collapsed');
+        scrollGroupHeader.classList.remove('collapsed');
+      } else {
+        this.collapsedGroups.add(group.key);
+        fixedGroupHeader.classList.add('collapsed');
+        scrollGroupHeader.classList.add('collapsed');
+      }
+      this.render();
+    };
+    
+    toggleBtn.addEventListener('click', handleToggleClick);
+    
+    // Sync hover state between group header parts
+    fixedGroupHeader.addEventListener('mouseenter', () => {
+      scrollGroupHeader.classList.add('hover');
+    });
+    fixedGroupHeader.addEventListener('mouseleave', () => {
+      scrollGroupHeader.classList.remove('hover');
+    });
+    scrollGroupHeader.addEventListener('mouseenter', () => {
+      fixedGroupHeader.classList.add('hover');
+    });
+    scrollGroupHeader.addEventListener('mouseleave', () => {
+      fixedGroupHeader.classList.remove('hover');
+    });
+    
+    return { fixedGroupHeader, scrollGroupHeader };
   }
 
   createGroupHeader(group) {

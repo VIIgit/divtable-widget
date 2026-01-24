@@ -152,14 +152,16 @@
         field: 'name',
         label: 'Name',
         responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
-        groupable: false
+        groupable: false,
+        fieldCompositeName: 'person'
       },
       {
         field: 'age',
         label: 'Age',
         render: (value) => value ? `${value} years` : '',
         responsive: { priority: 'medium', size: 'fixed-medium', hideSmall: true },
-        groupable: true
+        groupable: true,
+        fieldCompositeName: 'person'
       },
       {
         field: 'city',
@@ -298,6 +300,7 @@
         virtualScrollingTable = new DivTable(monaco, {
           tableWidgetElement: divTable3,
           data: null, //initialData,
+          fixedColumns: 1,
           columns: [
             {
               field: 'technical',
@@ -338,16 +341,14 @@
               field: 'tags',
               label: 'Tags',
               responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
-              groupable: true,
-              fieldCompositeName: 'locationStatus'
+              groupable: true
             },
             {
               field: 'city',
               label: 'City',
               render: (value) => value ? `<a href="https://www.example.com?city=${encodeURIComponent(value)}" target="_blank" rel="noopener noreferrer">${value}</a>` : '',
               responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
-              groupable: true,
-              fieldCompositeName: 'locationStatus'
+              groupable: true
             },
             {
               field: 'active',

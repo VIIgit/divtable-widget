@@ -9,6 +9,7 @@ A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML 
 - **Modern CSS-based Layout**: Uses CSS Grid and Flexbox for flexible, responsive design
 - **Advanced Query Language**: Monaco Editor integration with intelligent autocomplete and syntax highlighting
 - **Virtual Scrolling**: Efficiently handle large datasets with pagination support
+- **Fixed (Frozen) Columns**: Keep important columns visible while scrolling horizontally
 - **Auto-Fetch**: Automated pagination with play/pause/resume controls
 - **Grouping & Sorting**: Multi-level grouping with 4-state sorting (alphabetical asc/desc, count asc/desc)
 - **Selection Management**: Single and multi-row selection with checkbox support
@@ -107,6 +108,7 @@ const divTable = new DivTable(monaco, {
 | `primaryKeyField` | String | `'id'` | Field to use as primary key (auto-detected from columns if not specified) |
 | `group` | String | `null` | Field to group by initially (applies grouping on load) |
 | `sort` | Object | `null` | Initial sort: `{ field: string, direction: 'asc'|'desc' }` |
+| `fixedColumns` | Number | `0` | Number of columns to freeze on the left side when scrolling horizontally |
 
 ### Virtual Scrolling Options
 
@@ -263,6 +265,33 @@ divTable.stopAutoFetch();
 // The isAutoFetching and autoFetchPaused properties track the state
 ```
 
+### Fixed (Frozen) Columns
+
+Keep the first N columns fixed (frozen) on the left side while scrolling horizontally:
+
+```javascript
+const divTable = new DivTable(monaco, {
+  tableWidgetElement: document.getElementById('table-container'),
+  columns: [
+    { field: 'id', header: 'ID', primaryKey: true },
+    { field: 'name', header: 'Name' },
+    { field: 'email', header: 'Email' },
+    { field: 'department', header: 'Department' },
+    { field: 'status', header: 'Status' }
+  ],
+  data: myData,
+  fixedColumns: 2  // Freeze first 2 columns (ID and Name)
+});
+```
+
+**How it works:**
+
+- The first N data columns stay fixed on the left side
+- Remaining columns scroll horizontally
+- Vertical scrolling is synchronized between fixed and scrollable sections
+- Checkbox column (if enabled) is always part of the fixed section
+- Works with composite columns - each composite group counts as one column
+
 ## Column Configuration
 
 ### Basic Column
@@ -314,41 +343,13 @@ Use `fieldCompositeName` to stack multiple columns into a single visual cell:
 ```
 
 Each field in a composite cell:
+
 - Has its own label in the header (stacked vertically)
 - Can have its own render function
 - Can be sorted independently by clicking on its label
 - Can be grouped if `groupable: true`
 
-#### Deprecated: subLabel/subField Properties
 
-> ⚠️ **Deprecated**: The `subLabel`, `subField`, `subType`, and `subRender` properties are deprecated.
-> Please use `fieldCompositeName` instead for stacking fields in one column.
-
-```javascript
-// ❌ DEPRECATED - Do not use:
-{
-  field: 'name',
-  label: 'Name',
-  subLabel: 'Age',        // deprecated
-  subField: 'age',        // deprecated
-  subType: 'number',      // deprecated
-  subRender: (value) => `${value} years`  // deprecated
-}
-
-// ✅ USE THIS INSTEAD:
-{
-  field: 'name',
-  label: 'Name',
-  fieldCompositeName: 'person'
-},
-{
-  field: 'age',
-  label: 'Age',
-  type: 'number',
-  render: (value) => value ? `${value} years` : '',
-  fieldCompositeName: 'person'
-}
-```
 
 ### Column Render Function
 

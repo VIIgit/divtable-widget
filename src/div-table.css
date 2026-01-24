@@ -452,7 +452,7 @@
   border-bottom: 1px solid #e9ecef;
   display: grid;
   min-height: 48px;
-  align-items: start;
+  align-items: auto;
   color: #374151;
   transition: box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
@@ -481,7 +481,7 @@
 .div-table-row {
   display: grid;
   min-height: 44px;
-  align-items: start;
+  align-items: stretch;
   border-bottom: 1px solid #f1f3f4;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -645,7 +645,6 @@
   min-width: 40px;
   max-width: 40px;
   justify-content: center;
-  align-items: center;
   padding: 8px 4px;
 }
 
@@ -808,6 +807,7 @@ input[type="checkbox"]:indeterminate::after {
 /* Composite cell styling - for stacked rows (fieldCompositeName) */
 .div-table-cell.composite-cell {
   padding: 8px 12px;
+  display: flex;
   flex-direction: column;
   gap: 0;
   align-items: stretch;
@@ -816,6 +816,8 @@ input[type="checkbox"]:indeterminate::after {
 .composite-sub-cell {
   min-width: 0;
   overflow: hidden;
+  display: flex;
+  align-items: center;
 }
 
 .composite-sub-cell:first-child {
@@ -1098,10 +1100,15 @@ input[type="checkbox"]:indeterminate::after {
   color: white;
   border: none;
   border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  padding: 8px 12px;
+  flex-direction: column;
+  gap: 0;
+  align-items: stretch;
+}
+
+/* Top-align composite-sub-cell only within composite-cell */
+.div-table-cell.composite-cell .composite-sub-cell {
+  align-items: flex-start;
 }
 
 .retry-button:hover {
@@ -1110,4 +1117,215 @@ input[type="checkbox"]:indeterminate::after {
 
 .retry-button:active {
   background: #bd2130;
+}
+
+/* ============================================
+   Fixed Columns Layout
+   ============================================ */
+
+/* Container with fixed columns enabled */
+.div-table-container.has-fixed-columns {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Wrapper for the two column sections */
+.div-table-columns-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Fixed (frozen) section */
+.div-table-fixed-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e9ecef;
+  z-index: 5;
+  background: white;
+}
+
+/* Shadow only when horizontal scrolling is needed */
+.div-table-fixed-section.has-scroll-shadow {
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Scrollable section */
+.div-table-scroll-section {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Fixed header */
+.div-table-fixed-header {
+  position: relative;
+  z-index: 11;
+  flex-shrink: 0;
+  display: grid;
+  box-sizing: border-box;
+}
+
+/* Scrollable header - synced horizontally with body via JS */
+.div-table-scroll-header {
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  box-sizing: border-box;
+  /* Hide scrollbar but allow scrolling */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.div-table-scroll-header::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
+/* Inner wrapper for scroll header grid content */
+.div-table-scroll-header-inner {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* Fixed body - vertical scroll only */
+.div-table-fixed-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Hide scrollbar on fixed body (synced with scroll body) */
+.div-table-fixed-body::-webkit-scrollbar {
+  display: none;
+}
+.div-table-fixed-body {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Scrollable body - both scrolls */
+.div-table-scroll-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Row parts in fixed columns layout */
+.div-table-fixed-row,
+.div-table-scroll-row {
+  min-height: 44px;
+  box-sizing: border-box;
+  align-items: flex-start;
+}
+
+/* Ensure consistent row height between fixed and scroll sections */
+.div-table-fixed-row {
+  background: white;
+  display: grid;
+}
+
+.div-table-scroll-row {
+  background: white;
+  display: grid;
+}
+
+/* Hover state for split rows */
+.div-table-row.hover,
+.div-table-row:hover {
+  background-color: rgb(240, 247, 255);
+}
+
+/* Selected state for split rows */
+.div-table-fixed-row.selected,
+.div-table-scroll-row.selected {
+  background-color: rgba(0, 123, 255, 0.1) !important;
+}
+
+/* Focused state for split rows */
+.div-table-fixed-row.focused,
+.div-table-scroll-row.focused {
+  background-color: white;
+  box-shadow: inset 3px 0 0 #007bff;
+}
+
+.div-table-fixed-row.focused:hover,
+.div-table-scroll-row.focused:hover,
+.div-table-fixed-row.focused.hover,
+.div-table-scroll-row.focused.hover {
+  background-color: rgba(0, 123, 255, 0.05) !important;
+}
+
+/* Group header in fixed columns layout */
+.div-table-fixed-row.group-header,
+.div-table-scroll-row.group-header {
+  background: white;
+  border-bottom: 1px solid #f1f3f4;
+  border-top: 1px solid #f1f3f4;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+.div-table-fixed-row.group-header.focused,
+.div-table-scroll-row.group-header.focused {
+  background-color: white !important;
+  box-shadow: inset 3px 0 0 #007bff !important;
+}
+
+/* Scroll section: allow full content width since we can scroll horizontally */
+.div-table-scroll-section .div-table-cell {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.div-table-scroll-section .div-table-header-cell {
+  overflow: visible;
+}
+
+.div-table-scroll-section .header-left-content {
+  overflow: visible;
+}
+
+.div-table-scroll-section .header-left-content > span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+/* Ensure scroll section rows don't constrain content */
+.div-table-scroll-row {
+  min-width: 100%;
+  width: max-content;
+}
+
+/* Mobile: disable fixed columns on small screens */
+@media (max-width: 768px) {
+  .div-table-container.has-fixed-columns {
+    /* Fallback to standard layout */
+  }
+  
+  .div-table-columns-wrapper {
+    flex-direction: column;
+  }
+  
+  .div-table-fixed-section {
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: 1px solid #e9ecef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  .div-table-scroll-section {
+    flex: 1 1 auto;
+  }
 }
