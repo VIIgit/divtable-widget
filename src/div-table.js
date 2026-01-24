@@ -82,6 +82,17 @@ class DivTable {
     // Fixed columns option (frozen left columns)
     this.fixedColumns = options.fixedColumns || 0;
     
+    // Lazy cell rendering option (for performance optimization)
+    this.lazyCellRendering = options.lazyCellRendering !== false; // Enabled by default
+    this.lazyRenderMargin = options.lazyRenderMargin || '200px'; // Pre-render rows slightly before visible
+    this.rowObserver = null; // IntersectionObserver for lazy rendering
+    
+    // Aggregate summary row options
+    // Header summary shows totals for entire dataset (grand total)
+    // Group summary shows totals per group when data is grouped
+    this.showHeaderSummary = options.showHeaderSummary || false;
+    this.showGroupSummary = options.showGroupSummary || false;
+    
     // Find primary key field first
     this.primaryKeyField = this.columns.find(col => col.primaryKey)?.field || 'id';
     
@@ -1309,6 +1320,9 @@ class DivTable {
 
     // Update main header checkbox state
     this.updateHeaderCheckbox();
+    
+    // Update summary row aggregates based on current selection
+    this.updateSummaryRows();
   }
 
   updateSelectionStatesWithFixedColumns() {
@@ -1367,6 +1381,9 @@ class DivTable {
 
     // Update main header checkbox state
     this.updateHeaderCheckbox();
+    
+    // Update summary row aggregates based on current selection
+    this.updateSummaryRows();
   }
 
   updateHeaderCheckbox() {
@@ -1714,6 +1731,10 @@ class DivTable {
       if (row.classList.contains('group-header')) {
         // Group headers span all columns - set explicit width to match total
         row.style.gridTemplateColumns = '1fr';
+        row.style.minWidth = `${totalWidth}px`;
+      } else if (row.classList.contains('summary-row')) {
+        // Summary rows need the same grid template as regular rows
+        row.style.gridTemplateColumns = gridTemplate;
         row.style.minWidth = `${totalWidth}px`;
       } else {
         row.style.gridTemplateColumns = gridTemplate;
@@ -2239,6 +2260,11 @@ class DivTable {
   }
 
   renderBody() {
+    // Disconnect lazy rendering observer before clearing content
+    if (this.rowObserver) {
+      this.rowObserver.disconnect();
+    }
+    
     // Handle fixed columns layout
     if (this.fixedColumns > 0) {
       this.renderBodyWithFixedColumns();
@@ -2284,9 +2310,24 @@ class DivTable {
     } else {
       this.renderRegularRows(dataToRender);
     }
+    
+    // Add header summary row if enabled and has aggregate columns
+    if (this.showHeaderSummary && this.hasAggregateColumns()) {
+      const summaryRow = this.createHeaderSummaryRow(dataToRender);
+      // Insert at the beginning of body container (after header)
+      this.bodyContainer.insertBefore(summaryRow, this.bodyContainer.firstChild);
+    }
+    
+    // Setup lazy cell rendering observer if enabled
+    if (this.lazyCellRendering) {
+      this.setupLazyRenderingObserver();
+    }
   }
 
   renderBodyWithFixedColumns() {
+    // Preserve horizontal scroll position before clearing
+    const scrollLeft = this.scrollBodyContainer?.scrollLeft || 0;
+    
     this.fixedBodyContainer.innerHTML = '';
     this.scrollBodyContainer.innerHTML = '';
 
@@ -2327,11 +2368,31 @@ class DivTable {
       this.renderRegularRowsWithFixedColumns(dataToRender);
     }
     
+    // Add header summary row if enabled and has aggregate columns
+    if (this.showHeaderSummary && this.hasAggregateColumns()) {
+      const { fixedSummary, scrollSummary } = this.createHeaderSummaryRowWithFixedColumns(dataToRender);
+      // Insert at the beginning of body containers (after header)
+      this.fixedBodyContainer.insertBefore(fixedSummary, this.fixedBodyContainer.firstChild);
+      this.scrollBodyContainer.insertBefore(scrollSummary, this.scrollBodyContainer.firstChild);
+    }
+    
     // Synchronize column widths in scroll section (must be done before row heights)
     this.syncFixedColumnsColumnWidths();
     
     // Synchronize row heights between fixed and scroll sections
     this.syncFixedColumnsRowHeights();
+    
+    // Setup lazy cell rendering observer if enabled
+    if (this.lazyCellRendering) {
+      this.setupLazyRenderingObserver();
+    }
+    
+    // Restore horizontal scroll position after rendering
+    if (scrollLeft > 0) {
+      requestAnimationFrame(() => {
+        this.scrollBodyContainer.scrollLeft = scrollLeft;
+      });
+    }
   }
 
   renderRegularRowsWithFixedColumns(dataToRender = this.filteredData) {
@@ -2388,6 +2449,115 @@ class DivTable {
           this.scrollBodyContainer.appendChild(scrollRow);
         });
       }
+      
+      // Add group summary row after group (visible even when collapsed)
+      if (this.showGroupSummary && this.hasAggregateColumns()) {
+        const { fixedSummary, scrollSummary } = this.createGroupSummaryRowWithFixedColumns(group);
+        this.fixedBodyContainer.appendChild(fixedSummary);
+        this.scrollBodyContainer.appendChild(scrollSummary);
+      }
+    });
+  }
+
+  /**
+   * Setup IntersectionObserver for lazy cell rendering
+   * Observes unpopulated rows and populates them when they enter the viewport
+   */
+  setupLazyRenderingObserver() {
+    // Disconnect existing observer if any
+    if (this.rowObserver) {
+      this.rowObserver.disconnect();
+    }
+    
+    // Check for IntersectionObserver support
+    if (typeof IntersectionObserver === 'undefined') {
+      // Fallback: populate all rows immediately
+      console.warn('DivTable: IntersectionObserver not supported, falling back to eager rendering');
+      this.populateAllUnpopulatedRows();
+      return;
+    }
+    
+    // Determine the root element for observation
+    const rootElement = this.fixedColumns > 0 
+      ? this.scrollBodyContainer 
+      : this.bodyContainer;
+    
+    // Create observer with margin to pre-render rows slightly before visible
+    this.rowObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const row = entry.target;
+          
+          // Only populate if not already done
+          if (row.dataset.populated !== 'true') {
+            const rowId = row.dataset.id;
+            const item = this.findRowData(rowId);
+            
+            if (item) {
+              // Handle fixed columns layout
+              if (this.fixedColumns > 0) {
+                // Find the corresponding row in the other container
+                const isFixedRow = row.classList.contains('div-table-fixed-row');
+                let fixedRow, scrollRow;
+                
+                if (isFixedRow) {
+                  fixedRow = row;
+                  scrollRow = this.scrollBodyContainer.querySelector(`.div-table-row[data-id="${rowId}"]`);
+                } else {
+                  scrollRow = row;
+                  fixedRow = this.fixedBodyContainer.querySelector(`.div-table-row[data-id="${rowId}"]`);
+                }
+                
+                if (fixedRow && scrollRow) {
+                  this.populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
+                }
+              } else {
+                this.populateRowCells(row, item);
+              }
+            }
+          }
+          
+          // Unobserve after population
+          this.rowObserver.unobserve(row);
+        }
+      });
+    }, {
+      root: rootElement,
+      rootMargin: this.lazyRenderMargin, // Pre-render before visible
+      threshold: 0
+    });
+    
+    // Observe all unpopulated rows
+    const rows = this.fixedColumns > 0 
+      ? this.scrollBodyContainer.querySelectorAll('.div-table-row[data-populated="false"]')
+      : this.bodyContainer.querySelectorAll('.div-table-row[data-populated="false"]');
+    
+    rows.forEach(row => {
+      this.rowObserver.observe(row);
+    });
+    
+    // Also observe in fixed section if using fixed columns
+    if (this.fixedColumns > 0 && this.fixedBodyContainer) {
+      const fixedRows = this.fixedBodyContainer.querySelectorAll('.div-table-row[data-populated="false"]');
+      fixedRows.forEach(row => {
+        this.rowObserver.observe(row);
+      });
+    }
+  }
+  
+  /**
+   * Fallback method to populate all unpopulated rows (when IntersectionObserver not available)
+   */
+  populateAllUnpopulatedRows() {
+    const bodyContainer = this.fixedColumns > 0 ? this.scrollBodyContainer : this.bodyContainer;
+    const rows = bodyContainer.querySelectorAll('.div-table-row[data-populated="false"]');
+    
+    rows.forEach(row => {
+      const rowId = row.dataset.id;
+      const item = this.findRowData(rowId);
+      if (item) {
+        this.populateRowCells(row, item);
+      }
     });
   }
 
@@ -2443,7 +2613,340 @@ class DivTable {
           this.bodyContainer.appendChild(row);
         });
       }
+      
+      // Add group summary row after group (visible even when collapsed)
+      if (this.showGroupSummary && this.hasAggregateColumns()) {
+        const groupSummary = this.createGroupSummaryRow(group);
+        this.bodyContainer.appendChild(groupSummary);
+      }
     });
+  }
+
+  /**
+   * Populate cells for a row that was created as an empty shell (lazy rendering)
+   * @param {HTMLElement} row - The row element to populate
+   * @param {Object} item - The data item for this row
+   */
+  populateRowCells(row, item) {
+    // Skip if already populated
+    if (row.dataset.populated === 'true') return;
+    
+    const compositeColumns = this.getCompositeColumns();
+    const rowId = String(item[this.primaryKeyField]);
+
+    // Checkbox column
+    if (this.showCheckboxes) {
+      const checkboxCell = document.createElement('div');
+      checkboxCell.className = 'div-table-cell checkbox-column';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = this.selectedRows.has(rowId);
+      
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        
+        const rowData = this.findRowData(rowId);
+        if (!rowData) {
+          console.warn('DivTable: Could not find data for row ID:', rowId);
+          return;
+        }
+        
+        if (checkbox.checked) {
+          if (!this.multiSelect) this.clearSelection();
+          this.selectedRows.add(rowId);
+          rowData.selected = true;
+          row.classList.add('selected');
+        } else {
+          this.selectedRows.delete(rowId);
+          rowData.selected = false;
+          row.classList.remove('selected');
+          
+          if (this.showOnlySelected) {
+            this.renderBody();
+            this.updateInfoSection();
+            
+            const selectedData = Array.from(this.selectedRows)
+              .map(id => this.findRowData(id))
+              .filter(Boolean);
+            
+            if (typeof this.onSelectionChange === 'function') {
+              this.onSelectionChange(selectedData);
+            }
+            return;
+          }
+        }
+        
+        this.updateSelectionStates();
+        this.updateInfoSection();
+        
+        const selectedData = Array.from(this.selectedRows)
+          .map(id => this.findRowData(id))
+          .filter(Boolean);
+        
+        if (typeof this.onSelectionChange === 'function') {
+          this.onSelectionChange(selectedData);
+        }
+      });
+      
+      checkbox.addEventListener('focus', (e) => {
+        this.updateFocusState(row);
+      });
+      
+      checkboxCell.appendChild(checkbox);
+      
+      checkboxCell.addEventListener('click', (e) => {
+        if (e.target === checkbox) return;
+        e.stopPropagation();
+        checkbox.click();
+      });
+      
+      row.appendChild(checkboxCell);
+    }
+
+    // Data columns - render using composite structure
+    compositeColumns.forEach(composite => {
+      const cell = document.createElement('div');
+      cell.className = 'div-table-cell';
+      
+      if (composite.compositeName) {
+        cell.classList.add('composite-cell');
+        cell.style.display = 'flex';
+        cell.style.flexDirection = 'column';
+        cell.style.gap = '4px';
+        
+        composite.columns.forEach((col, index) => {
+          const subCell = document.createElement('div');
+          subCell.className = 'composite-sub-cell';
+          
+          if (this.groupByField && col.field === this.groupByField) {
+            subCell.classList.add('grouped-column');
+            subCell.textContent = '';
+          } else {
+            if (col.subField) {
+              subCell.classList.add('composite-column');
+              subCell.style.display = 'flex';
+              subCell.style.flexDirection = 'column';
+              subCell.style.gap = '2px';
+              
+              const mainDiv = document.createElement('div');
+              mainDiv.className = 'composite-main';
+              if (typeof col.render === 'function') {
+                mainDiv.innerHTML = col.render(item[col.field], item);
+              } else {
+                mainDiv.innerHTML = item[col.field] ?? '';
+              }
+              
+              const subDiv = document.createElement('div');
+              subDiv.className = 'composite-sub';
+              if (typeof col.subRender === 'function') {
+                subDiv.innerHTML = col.subRender(item[col.subField], item);
+              } else {
+                subDiv.innerHTML = item[col.subField] ?? '';
+              }
+              
+              subCell.appendChild(mainDiv);
+              subCell.appendChild(subDiv);
+            } else {
+              if (typeof col.render === 'function') {
+                subCell.innerHTML = col.render(item[col.field], item);
+              } else {
+                subCell.innerHTML = item[col.field] ?? '';
+              }
+            }
+          }
+          
+          cell.appendChild(subCell);
+        });
+      } else {
+        const col = composite.columns[0];
+        
+        if (this.groupByField && col.field === this.groupByField) {
+          cell.classList.add('grouped-column');
+          cell.textContent = '';
+        } else {
+          if (col.subField) {
+            cell.classList.add('composite-column');
+            
+            const mainDiv = document.createElement('div');
+            mainDiv.className = 'composite-main';
+            if (typeof col.render === 'function') {
+              mainDiv.innerHTML = col.render(item[col.field], item);
+            } else {
+              mainDiv.innerHTML = item[col.field] ?? '';
+            }
+            
+            const subDiv = document.createElement('div');
+            subDiv.className = 'composite-sub';
+            if (typeof col.subRender === 'function') {
+              subDiv.innerHTML = col.subRender(item[col.subField], item);
+            } else {
+              subDiv.innerHTML = item[col.subField] ?? '';
+            }
+            
+            cell.appendChild(mainDiv);
+            cell.appendChild(subDiv);
+          } else {
+            if (typeof col.render === 'function') {
+              cell.innerHTML = col.render(item[col.field], item);
+            } else {
+              cell.innerHTML = item[col.field] ?? '';
+            }
+          }
+        }
+      }
+      
+      row.appendChild(cell);
+    });
+
+    // Mark as populated
+    row.dataset.populated = 'true';
+    
+    // Remove min-height constraint and update estimated height
+    row.style.minHeight = '';
+    
+    // Measure actual height and update estimate for future rows (only once when height increases)
+    requestAnimationFrame(() => {
+      const actualHeight = row.offsetHeight;
+      if (actualHeight > this.estimatedRowHeight) {
+        this.estimatedRowHeight = actualHeight;
+      }
+    });
+    
+    // Update tab indexes after population
+    this.updateTabIndexes();
+  }
+
+  /**
+   * Populate cells for fixed columns layout (both fixed and scroll row parts)
+   * @param {HTMLElement} fixedRow - The fixed row element
+   * @param {HTMLElement} scrollRow - The scroll row element  
+   * @param {Object} item - The data item for this row
+   */
+  populateRowCellsWithFixedColumns(fixedRow, scrollRow, item) {
+    // Skip if already populated
+    if (fixedRow.dataset.populated === 'true') return;
+    
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const rowId = String(item[this.primaryKeyField]);
+    
+    // Checkbox column (in fixed row only)
+    if (this.showCheckboxes) {
+      const checkboxCell = document.createElement('div');
+      checkboxCell.className = 'div-table-cell checkbox-column';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = this.selectedRows.has(rowId);
+      
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        
+        const rowData = this.findRowData(rowId);
+        if (!rowData) {
+          console.warn('DivTable: Could not find data for row ID:', rowId);
+          return;
+        }
+        
+        if (checkbox.checked) {
+          if (!this.multiSelect) this.clearSelection();
+          this.selectedRows.add(rowId);
+          rowData.selected = true;
+          fixedRow.classList.add('selected');
+          scrollRow.classList.add('selected');
+        } else {
+          this.selectedRows.delete(rowId);
+          rowData.selected = false;
+          fixedRow.classList.remove('selected');
+          scrollRow.classList.remove('selected');
+          
+          if (this.showOnlySelected) {
+            this.renderBody();
+            this.updateInfoSection();
+            
+            const selectedData = Array.from(this.selectedRows)
+              .map(id => this.findRowData(id))
+              .filter(Boolean);
+            
+            if (typeof this.onSelectionChange === 'function') {
+              this.onSelectionChange(selectedData);
+            }
+            return;
+          }
+        }
+        
+        this.updateSelectionStates();
+        this.updateInfoSection();
+        
+        const selectedData = Array.from(this.selectedRows)
+          .map(id => this.findRowData(id))
+          .filter(Boolean);
+        
+        if (typeof this.onSelectionChange === 'function') {
+          this.onSelectionChange(selectedData);
+        }
+      });
+      
+      checkbox.addEventListener('focus', (e) => {
+        this.updateFocusStateForFixedRows(fixedRow, scrollRow);
+      });
+      
+      checkboxCell.appendChild(checkbox);
+      
+      checkboxCell.addEventListener('click', (e) => {
+        if (e.target === checkbox) return;
+        e.stopPropagation();
+        checkbox.click();
+      });
+      
+      fixedRow.appendChild(checkboxCell);
+    }
+    
+    // Render fixed columns
+    fixedColumns.forEach(composite => {
+      const cell = this.createCellForComposite(composite, item);
+      fixedRow.appendChild(cell);
+    });
+    
+    // Render scrollable columns
+    scrollColumns.forEach(composite => {
+      const cell = this.createCellForComposite(composite, item);
+      scrollRow.appendChild(cell);
+    });
+    
+    // Mark as populated
+    fixedRow.dataset.populated = 'true';
+    scrollRow.dataset.populated = 'true';
+    
+    // Remove min-height constraints and synchronize row heights
+    fixedRow.style.minHeight = '';
+    scrollRow.style.minHeight = '';
+    
+    // Synchronize heights between fixed and scroll row parts after cell population
+    requestAnimationFrame(() => {
+      // Reset any previously set explicit heights
+      fixedRow.style.height = '';
+      scrollRow.style.height = '';
+      
+      // Get natural heights after cell content is rendered
+      const fixedHeight = fixedRow.offsetHeight;
+      const scrollHeight = scrollRow.offsetHeight;
+      
+      // Set both to the maximum height
+      const maxHeight = Math.max(fixedHeight, scrollHeight);
+      if (maxHeight > 0) {
+        fixedRow.style.height = `${maxHeight}px`;
+        scrollRow.style.height = `${maxHeight}px`;
+      }
+      
+      // Update estimated height for future rows
+      if (maxHeight > this.estimatedRowHeight) {
+        this.estimatedRowHeight = maxHeight;
+      }
+    });
+    
+    // Update tab indexes after population
+    this.updateTabIndexes();
   }
 
   createRow(item) {
@@ -2496,7 +2999,51 @@ class DivTable {
       row.classList.add('focused');
     }
 
-    // Checkbox column
+    // If lazy cell rendering is enabled, create empty shell and defer cell creation
+    if (this.lazyCellRendering) {
+      // Set minimum height to prevent layout shift
+      row.style.minHeight = this.estimatedRowHeight + 'px';
+      row.dataset.populated = 'false';
+      
+      // Row click handler - populate cells first if needed
+      row.addEventListener('click', (e) => {
+        // Populate cells if not yet done
+        if (row.dataset.populated !== 'true') {
+          this.populateRowCells(row, item);
+        }
+        
+        // Only handle focus if not clicking on checkbox column
+        if (e.target.closest('.checkbox-column')) return;
+        
+        const selection = window.getSelection();
+        if (selection.toString().length > 0) return;
+        
+        const focusableElement = this.getFocusableElementForRow(row);
+        if (focusableElement) {
+          const currentFocused = this.getCurrentFocusedElement();
+          if (currentFocused === focusableElement) return;
+          
+          const focusableElements = this.getAllFocusableElements();
+          const focusIndex = focusableElements.indexOf(focusableElement);
+          
+          if (focusIndex !== -1) {
+            this.focusElementAtIndex(focusIndex);
+          }
+        }
+      });
+
+      row.addEventListener('focus', (e) => {
+        // Populate cells if not yet done
+        if (row.dataset.populated !== 'true') {
+          this.populateRowCells(row, item);
+        }
+        this.updateFocusState(row);
+      });
+
+      return row;
+    }
+
+    // Non-lazy rendering: create cells immediately (original behavior)
     if (this.showCheckboxes) {
       const checkboxCell = document.createElement('div');
       checkboxCell.className = 'div-table-cell checkbox-column';
@@ -2768,6 +3315,55 @@ class DivTable {
       scrollRow.classList.add('focused');
     }
     
+    // If lazy cell rendering is enabled, create empty shells and defer cell creation
+    if (this.lazyCellRendering) {
+      fixedRow.style.minHeight = this.estimatedRowHeight + 'px';
+      scrollRow.style.minHeight = this.estimatedRowHeight + 'px';
+      fixedRow.dataset.populated = 'false';
+      scrollRow.dataset.populated = 'false';
+      
+      // Row click handler - populate cells first if needed
+      const handleRowClick = (e, targetRow) => {
+        // Populate cells if not yet done
+        if (fixedRow.dataset.populated !== 'true') {
+          this.populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
+        }
+        
+        if (e.target.closest('.checkbox-column')) return;
+        
+        const selection = window.getSelection();
+        if (selection.toString().length > 0) return;
+        
+        const focusableElement = this.getFocusableElementForRow(fixedRow);
+        if (focusableElement) {
+          const focusableElements = this.getAllFocusableElements();
+          const focusIndex = focusableElements.indexOf(focusableElement);
+          if (focusIndex !== -1) {
+            this.focusElementAtIndex(focusIndex);
+          }
+        }
+      };
+      
+      fixedRow.addEventListener('click', (e) => handleRowClick(e, fixedRow));
+      scrollRow.addEventListener('click', (e) => handleRowClick(e, scrollRow));
+      
+      fixedRow.addEventListener('focus', (e) => {
+        if (fixedRow.dataset.populated !== 'true') {
+          this.populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
+        }
+        this.updateFocusStateForFixedRows(fixedRow, scrollRow);
+      });
+      
+      // Sync hover state between row parts
+      fixedRow.addEventListener('mouseenter', () => scrollRow.classList.add('hover'));
+      fixedRow.addEventListener('mouseleave', () => scrollRow.classList.remove('hover'));
+      scrollRow.addEventListener('mouseenter', () => fixedRow.classList.add('hover'));
+      scrollRow.addEventListener('mouseleave', () => fixedRow.classList.remove('hover'));
+      
+      return { fixedRow, scrollRow };
+    }
+
+    // Non-lazy rendering: create cells immediately (original behavior)
     // Checkbox column (in fixed row only)
     if (this.showCheckboxes) {
       const checkboxCell = document.createElement('div');
@@ -2913,6 +3509,13 @@ class DivTable {
   createCellForComposite(composite, item) {
     const cell = document.createElement('div');
     cell.className = 'div-table-cell';
+    
+    // Apply text alignment from column config (single column only)
+    if (!composite.compositeName && composite.columns[0]?.align) {
+      cell.style.textAlign = composite.columns[0].align;
+      cell.style.justifyContent = composite.columns[0].align === 'right' ? 'flex-end' : 
+                                   composite.columns[0].align === 'center' ? 'center' : 'flex-start';
+    }
     
     if (composite.compositeName) {
       // Composite cell with multiple columns stacked vertically
@@ -4992,6 +5595,566 @@ class DivTable {
   setLoadingState(isLoading) {
     this.isLoadingState = Boolean(isLoading);
     this.render(); // Re-render to show/hide loading placeholder
+  }
+
+  // =====================================
+  // Aggregate Summary Row Methods
+  // =====================================
+
+  /**
+   * Check if any column has an aggregate defined
+   * @returns {boolean} True if at least one column has aggregate property
+   */
+  hasAggregateColumns() {
+    return this.columns.some(col => col.aggregate);
+  }
+
+  /**
+   * Get columns that have aggregate functions defined
+   * @returns {Array} Array of columns with aggregate property
+   */
+  getAggregateColumns() {
+    return this.columns.filter(col => col.aggregate);
+  }
+
+  /**
+   * Calculate aggregate value for a specific column and data set
+   * @param {Object} column - Column definition with aggregate property
+   * @param {Array} data - Array of data items to aggregate
+   * @returns {number|null} Calculated aggregate value
+   */
+  calculateAggregate(column, data) {
+    if (!column.aggregate || !data || data.length === 0) {
+      return null;
+    }
+
+    const field = column.field;
+    const aggregateType = column.aggregate.toLowerCase();
+    
+    // Extract numeric values from data
+    const values = data
+      .map(item => item[field])
+      .filter(val => val !== null && val !== undefined && !isNaN(parseFloat(val)))
+      .map(val => parseFloat(val));
+    
+    if (values.length === 0 && aggregateType !== 'count') {
+      return null;
+    }
+
+    switch (aggregateType) {
+      case 'sum':
+        return values.reduce((sum, val) => sum + val, 0);
+      
+      case 'avg':
+      case 'average':
+        return values.length > 0 ? values.reduce((sum, val) => sum + val, 0) / values.length : null;
+      
+      case 'count':
+        return data.length;
+      
+      case 'min':
+        return values.length > 0 ? Math.min(...values) : null;
+      
+      case 'max':
+        return values.length > 0 ? Math.max(...values) : null;
+      
+      default:
+        console.warn(`DivTable: Unknown aggregate type '${aggregateType}' for column '${field}'`);
+        return null;
+    }
+  }
+
+  /**
+   * Get the data set to use for aggregation, considering selection state
+   * For header summary: all filtered data, or selected rows if any are selected
+   * @param {Array} dataToRender - The currently displayed data
+   * @returns {Array} Data set to use for aggregation
+   */
+  getAggregationDataSet(dataToRender) {
+    // If there are selected rows, aggregate only selected rows
+    if (this.selectedRows.size > 0) {
+      return dataToRender.filter(item => {
+        const itemId = String(item[this.primaryKeyField]);
+        return this.selectedRows.has(itemId);
+      });
+    }
+    // Otherwise aggregate all displayed data
+    return dataToRender;
+  }
+
+  /**
+   * Format aggregate value for display
+   * @param {number|null} value - The aggregate value
+   * @param {Object} column - Column definition
+   * @returns {string} Formatted value string
+   */
+  formatAggregateValue(value, column) {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    
+    // Use column's render function if available for formatting
+    // But only pass the value, not row data
+    if (typeof column.aggregateRender === 'function') {
+      return column.aggregateRender(value);
+    }
+    
+    // Default formatting based on aggregate type
+    const aggregateType = column.aggregate.toLowerCase();
+    
+    if (aggregateType === 'count') {
+      return String(value);
+    }
+    
+    // For numeric values, use locale formatting
+    if (typeof value === 'number') {
+      // Check if it's a decimal that needs precision
+      if (aggregateType === 'avg' || aggregateType === 'average') {
+        return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+      }
+      return value.toLocaleString();
+    }
+    
+    return String(value);
+  }
+
+  /**
+   * Create the header summary row (grand total row below header)
+   * @param {Array} dataToRender - Data to calculate aggregates from
+   * @returns {HTMLElement} Summary row element
+   */
+  createHeaderSummaryRow(dataToRender) {
+    const summaryRow = document.createElement('div');
+    summaryRow.className = 'div-table-row summary-row header-summary';
+    
+    const compositeColumns = this.getCompositeColumns();
+    const aggregationData = this.getAggregationDataSet(dataToRender);
+    
+    // Build grid template matching header
+    let gridTemplate = '';
+    if (this.showCheckboxes) {
+      gridTemplate = '40px '; // Checkbox column
+    }
+    
+    compositeColumns.forEach(composite => {
+      const firstCol = composite.columns[0];
+      const responsive = firstCol.responsive || {};
+      switch (responsive.size) {
+        case 'fixed-narrow': gridTemplate += '80px '; break;
+        case 'fixed-medium': gridTemplate += '120px '; break;
+        case 'flexible-small': gridTemplate += '1fr '; break;
+        case 'flexible-medium': gridTemplate += '2fr '; break;
+        case 'flexible-large': gridTemplate += '3fr '; break;
+        default: gridTemplate += '1fr ';
+      }
+    });
+    
+    summaryRow.style.gridTemplateColumns = gridTemplate.trim();
+    
+    // Empty checkbox cell
+    if (this.showCheckboxes) {
+      const emptyCell = document.createElement('div');
+      emptyCell.className = 'div-table-cell checkbox-column summary-cell';
+      summaryRow.appendChild(emptyCell);
+    }
+    
+    // Create cells for each composite column
+    compositeColumns.forEach(composite => {
+      const cell = document.createElement('div');
+      cell.className = 'div-table-cell summary-cell';
+      
+      if (composite.compositeName) {
+        // Composite column - check each sub-column for aggregates
+        cell.classList.add('composite-cell');
+        
+        composite.columns.forEach((col, idx) => {
+          const subCell = document.createElement('div');
+          subCell.className = 'composite-sub-cell';
+          
+          if (col.aggregate) {
+            const aggregateValue = this.calculateAggregate(col, aggregationData);
+            const formattedValue = this.formatAggregateValue(aggregateValue, col);
+            subCell.innerHTML = formattedValue;
+            subCell.classList.add('aggregate-value');
+          }
+          
+          cell.appendChild(subCell);
+        });
+      } else {
+        // Single column
+        const col = composite.columns[0];
+        
+        if (col.aggregate) {
+          const aggregateValue = this.calculateAggregate(col, aggregationData);
+          const formattedValue = this.formatAggregateValue(aggregateValue, col);
+          cell.innerHTML = formattedValue;
+          cell.classList.add('aggregate-value');
+        }
+      }
+      
+      summaryRow.appendChild(cell);
+    });
+    
+    return summaryRow;
+  }
+
+  /**
+   * Create a group summary row (subtotal row after group items)
+   * @param {Object} group - Group object with items array
+   * @returns {HTMLElement} Group summary row element
+   */
+  createGroupSummaryRow(group) {
+    const summaryRow = document.createElement('div');
+    summaryRow.className = 'div-table-row summary-row group-summary';
+    summaryRow.dataset.groupKey = group.key;
+    
+    const compositeColumns = this.getCompositeColumns();
+    
+    // For group summary, aggregate only the items in this group
+    // But also respect selection: if items are selected, only aggregate selected items in this group
+    let groupData = group.items;
+    if (this.selectedRows.size > 0) {
+      groupData = group.items.filter(item => {
+        const itemId = String(item[this.primaryKeyField]);
+        return this.selectedRows.has(itemId);
+      });
+    }
+    
+    // Build grid template matching body rows
+    let gridTemplate = '';
+    if (this.showCheckboxes) {
+      gridTemplate = '40px ';
+    }
+    
+    compositeColumns.forEach(composite => {
+      const firstCol = composite.columns[0];
+      const responsive = firstCol.responsive || {};
+      switch (responsive.size) {
+        case 'fixed-narrow': gridTemplate += '80px '; break;
+        case 'fixed-medium': gridTemplate += '120px '; break;
+        case 'flexible-small': gridTemplate += '1fr '; break;
+        case 'flexible-medium': gridTemplate += '2fr '; break;
+        case 'flexible-large': gridTemplate += '3fr '; break;
+        default: gridTemplate += '1fr ';
+      }
+    });
+    
+    summaryRow.style.gridTemplateColumns = gridTemplate.trim();
+    
+    // Empty checkbox cell
+    if (this.showCheckboxes) {
+      const emptyCell = document.createElement('div');
+      emptyCell.className = 'div-table-cell checkbox-column summary-cell';
+      summaryRow.appendChild(emptyCell);
+    }
+    
+    // Create cells for each composite column
+    compositeColumns.forEach(composite => {
+      const cell = document.createElement('div');
+      cell.className = 'div-table-cell summary-cell';
+      
+      if (composite.compositeName) {
+        cell.classList.add('composite-cell');
+        
+        composite.columns.forEach(col => {
+          const subCell = document.createElement('div');
+          subCell.className = 'composite-sub-cell';
+          
+          if (col.aggregate) {
+            const aggregateValue = this.calculateAggregate(col, groupData);
+            const formattedValue = this.formatAggregateValue(aggregateValue, col);
+            subCell.innerHTML = formattedValue;
+            subCell.classList.add('aggregate-value');
+          }
+          
+          cell.appendChild(subCell);
+        });
+      } else {
+        const col = composite.columns[0];
+        
+        if (col.aggregate) {
+          const aggregateValue = this.calculateAggregate(col, groupData);
+          const formattedValue = this.formatAggregateValue(aggregateValue, col);
+          cell.innerHTML = formattedValue;
+          cell.classList.add('aggregate-value');
+        }
+      }
+      
+      summaryRow.appendChild(cell);
+    });
+    
+    return summaryRow;
+  }
+
+  /**
+   * Create header summary row pair for fixed columns layout
+   * @param {Array} dataToRender - Data to calculate aggregates from
+   * @returns {Object} Object with fixedSummary and scrollSummary elements
+   */
+  createHeaderSummaryRowWithFixedColumns(dataToRender) {
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const aggregationData = this.getAggregationDataSet(dataToRender);
+    
+    // Fixed section summary row
+    const fixedSummary = document.createElement('div');
+    fixedSummary.className = 'div-table-row div-table-fixed-row summary-row header-summary';
+    
+    let fixedGridTemplate = '';
+    if (this.showCheckboxes) {
+      fixedGridTemplate = '40px ';
+    }
+    
+    fixedColumns.forEach(composite => {
+      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    
+    fixedSummary.style.gridTemplateColumns = fixedGridTemplate.trim();
+    
+    // Empty checkbox cell in fixed section
+    if (this.showCheckboxes) {
+      const emptyCell = document.createElement('div');
+      emptyCell.className = 'div-table-cell checkbox-column summary-cell';
+      fixedSummary.appendChild(emptyCell);
+    }
+    
+    // Fixed columns cells
+    fixedColumns.forEach(composite => {
+      const cell = this.createSummaryCell(composite, aggregationData);
+      fixedSummary.appendChild(cell);
+    });
+    
+    // Scroll section summary row
+    const scrollSummary = document.createElement('div');
+    scrollSummary.className = 'div-table-row summary-row header-summary';
+    
+    let scrollGridTemplate = '';
+    scrollColumns.forEach(composite => {
+      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    
+    scrollSummary.style.gridTemplateColumns = scrollGridTemplate.trim();
+    
+    // Scroll columns cells
+    scrollColumns.forEach(composite => {
+      const cell = this.createSummaryCell(composite, aggregationData);
+      scrollSummary.appendChild(cell);
+    });
+    
+    return { fixedSummary, scrollSummary };
+  }
+
+  /**
+   * Create group summary row pair for fixed columns layout
+   * @param {Object} group - Group object with items array
+   * @returns {Object} Object with fixedSummary and scrollSummary elements
+   */
+  createGroupSummaryRowWithFixedColumns(group) {
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    
+    // Get data for this group, considering selection
+    let groupData = group.items;
+    if (this.selectedRows.size > 0) {
+      groupData = group.items.filter(item => {
+        const itemId = String(item[this.primaryKeyField]);
+        return this.selectedRows.has(itemId);
+      });
+    }
+    
+    // Fixed section summary row
+    const fixedSummary = document.createElement('div');
+    fixedSummary.className = 'div-table-row div-table-fixed-row summary-row group-summary';
+    fixedSummary.dataset.groupKey = group.key;
+    
+    let fixedGridTemplate = '';
+    if (this.showCheckboxes) {
+      fixedGridTemplate = '40px ';
+    }
+    
+    fixedColumns.forEach(composite => {
+      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    
+    fixedSummary.style.gridTemplateColumns = fixedGridTemplate.trim();
+    
+    // Empty checkbox cell
+    if (this.showCheckboxes) {
+      const emptyCell = document.createElement('div');
+      emptyCell.className = 'div-table-cell checkbox-column summary-cell';
+      fixedSummary.appendChild(emptyCell);
+    }
+    
+    // Fixed columns cells
+    fixedColumns.forEach(composite => {
+      const cell = this.createSummaryCell(composite, groupData);
+      fixedSummary.appendChild(cell);
+    });
+    
+    // Scroll section summary row
+    const scrollSummary = document.createElement('div');
+    scrollSummary.className = 'div-table-row summary-row group-summary';
+    scrollSummary.dataset.groupKey = group.key;
+    
+    let scrollGridTemplate = '';
+    scrollColumns.forEach(composite => {
+      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
+    });
+    
+    scrollSummary.style.gridTemplateColumns = scrollGridTemplate.trim();
+    
+    // Scroll columns cells
+    scrollColumns.forEach(composite => {
+      const cell = this.createSummaryCell(composite, groupData);
+      scrollSummary.appendChild(cell);
+    });
+    
+    return { fixedSummary, scrollSummary };
+  }
+
+  /**
+   * Create a summary cell for a composite column
+   * @param {Object} composite - Composite column definition
+   * @param {Array} data - Data to aggregate
+   * @returns {HTMLElement} Cell element
+   */
+  createSummaryCell(composite, data) {
+    const cell = document.createElement('div');
+    cell.className = 'div-table-cell summary-cell';
+    
+    if (composite.compositeName) {
+      cell.classList.add('composite-cell');
+      
+      composite.columns.forEach(col => {
+        const subCell = document.createElement('div');
+        subCell.className = 'composite-sub-cell';
+        
+        if (col.aggregate) {
+          const aggregateValue = this.calculateAggregate(col, data);
+          const formattedValue = this.formatAggregateValue(aggregateValue, col);
+          subCell.innerHTML = formattedValue;
+          subCell.classList.add('aggregate-value');
+          // Apply column alignment
+          if (col.align) {
+            subCell.style.textAlign = col.align;
+          }
+        }
+        
+        cell.appendChild(subCell);
+      });
+    } else {
+      const col = composite.columns[0];
+      
+      // Apply column alignment to summary cell
+      if (col.align) {
+        cell.style.textAlign = col.align;
+        cell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
+                                     col.align === 'center' ? 'center' : 'flex-start';
+      }
+      
+      if (col.aggregate) {
+        const aggregateValue = this.calculateAggregate(col, data);
+        const formattedValue = this.formatAggregateValue(aggregateValue, col);
+        cell.innerHTML = formattedValue;
+        cell.classList.add('aggregate-value');
+      }
+    }
+    
+    return cell;
+  }
+
+  /**
+   * Update all summary rows (called when selection changes)
+   * Re-calculates aggregates based on current selection state
+   */
+  updateSummaryRows() {
+    if (!this.hasAggregateColumns()) return;
+    if (!this.showHeaderSummary && !this.showGroupSummary) return;
+    
+    // Get current data to render
+    let dataToRender = this.filteredData;
+    if (this.showOnlySelected && this.selectedRows.size > 0) {
+      dataToRender = this.filteredData.filter(item => {
+        const itemId = String(item[this.primaryKeyField]);
+        return this.selectedRows.has(itemId);
+      });
+    }
+    
+    const aggregationData = this.getAggregationDataSet(dataToRender);
+    
+    // Update header summary row
+    if (this.showHeaderSummary) {
+      this.updateHeaderSummaryValues(aggregationData);
+    }
+    
+    // Update group summary rows
+    if (this.showGroupSummary && this.groupByField) {
+      this.updateGroupSummaryValues(dataToRender);
+    }
+  }
+
+  /**
+   * Update aggregate values in the header summary row
+   * @param {Array} aggregationData - Data to aggregate
+   */
+  updateHeaderSummaryValues(aggregationData) {
+    const summaryRows = this.fixedColumns > 0
+      ? [
+          this.fixedBodyContainer?.querySelector('.header-summary'),
+          this.scrollBodyContainer?.querySelector('.header-summary')
+        ].filter(Boolean)
+      : [this.bodyContainer?.querySelector('.header-summary')].filter(Boolean);
+    
+    summaryRows.forEach(summaryRow => {
+      const aggregateCells = summaryRow.querySelectorAll('.aggregate-value');
+      const aggregateColumns = this.getAggregateColumns();
+      
+      aggregateCells.forEach((cell, index) => {
+        if (aggregateColumns[index]) {
+          const col = aggregateColumns[index];
+          const aggregateValue = this.calculateAggregate(col, aggregationData);
+          const formattedValue = this.formatAggregateValue(aggregateValue, col);
+          cell.innerHTML = formattedValue;
+        }
+      });
+    });
+  }
+
+  /**
+   * Update aggregate values in all group summary rows
+   * @param {Array} dataToRender - Current displayed data
+   */
+  updateGroupSummaryValues(dataToRender) {
+    const groups = this.groupData(dataToRender);
+    
+    groups.forEach(group => {
+      let groupData = group.items;
+      if (this.selectedRows.size > 0) {
+        groupData = group.items.filter(item => {
+          const itemId = String(item[this.primaryKeyField]);
+          return this.selectedRows.has(itemId);
+        });
+      }
+      
+      const groupSummaries = this.fixedColumns > 0
+        ? [
+            this.fixedBodyContainer?.querySelector(`.group-summary[data-group-key="${group.key}"]`),
+            this.scrollBodyContainer?.querySelector(`.group-summary[data-group-key="${group.key}"]`)
+          ].filter(Boolean)
+        : [this.bodyContainer?.querySelector(`.group-summary[data-group-key="${group.key}"]`)].filter(Boolean);
+      
+      groupSummaries.forEach(summaryRow => {
+        const aggregateCells = summaryRow.querySelectorAll('.aggregate-value');
+        const aggregateColumns = this.getAggregateColumns();
+        
+        aggregateCells.forEach((cell, index) => {
+          if (aggregateColumns[index]) {
+            const col = aggregateColumns[index];
+            const aggregateValue = this.calculateAggregate(col, groupData);
+            const formattedValue = this.formatAggregateValue(aggregateValue, col);
+            cell.innerHTML = formattedValue;
+          }
+        });
+      });
+    });
   }
 }
 

@@ -1217,6 +1217,21 @@ input[type="checkbox"]:indeterminate::after {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Use overlay scrollbars to prevent layout shift */
+  overflow-y: overlay;
+  overflow-x: overlay;
+}
+
+/* For browsers that support scrollbar-gutter */
+@supports (scrollbar-gutter: stable) {
+  .div-table-scroll-body {
+    overflow-y: auto;
+    overflow-x: auto;
+    scrollbar-gutter: stable;
+  }
+  .div-table-fixed-body {
+    scrollbar-gutter: stable;
+  }
 }
 
 /* Row parts in fixed columns layout */
@@ -1328,4 +1343,65 @@ input[type="checkbox"]:indeterminate::after {
   .div-table-scroll-section {
     flex: 1 1 auto;
   }
+}
+
+/* =====================================
+   Summary Row Styles (Aggregate Totals)
+   ===================================== */
+
+/* Base summary row styling */
+.div-table-row.summary-row {
+  background-color: white;
+  border-bottom: 2px solid #ced4da;
+  font-weight: 600;
+  min-height: 32px;
+}
+
+/* Header summary row (grand total) */
+.div-table-row.header-summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #adb5bd;
+}
+
+/* Group summary row (subtotal) */
+.div-table-row.group-summary {
+  font-weight: 500;
+  font-size: 0.95em;
+  border-bottom: 1px solid #adb5bd;
+}
+
+/* Summary cell styling */
+.div-table-cell.summary-cell {
+  padding: 8px 12px;
+  color: #495057;
+}
+
+/* Aggregate value styling */
+.aggregate-value {
+  font-variant-numeric: tabular-nums;
+  color: #212529;
+  font-weight: 700;
+}
+
+/* Summary row hover effect */
+.div-table-row.summary-row:hover {
+  background-color: #f8f9fa;
+}
+
+/* Summary row in fixed columns layout */
+.div-table-fixed-row.summary-row {
+  background-color: white;
+  min-height: 32px;
+}
+
+.div-table-fixed-row.header-summary {
+  background-color: #f8f9fa;
+}
+
+/* Empty summary cells should not affect layout */
+.div-table-cell.summary-cell:empty {
+  min-height: 1em;
 }

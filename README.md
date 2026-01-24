@@ -10,6 +10,7 @@ A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML 
 - **Advanced Query Language**: Monaco Editor integration with intelligent autocomplete and syntax highlighting
 - **Virtual Scrolling**: Efficiently handle large datasets with pagination support
 - **Fixed (Frozen) Columns**: Keep important columns visible while scrolling horizontally
+- **Summary Rows**: Aggregate calculations (sum, avg, count, min, max) with header and group summaries
 - **Auto-Fetch**: Automated pagination with play/pause/resume controls
 - **Grouping & Sorting**: Multi-level grouping with 4-state sorting (alphabetical asc/desc, count asc/desc)
 - **Selection Management**: Single and multi-row selection with checkbox support
@@ -109,6 +110,8 @@ const divTable = new DivTable(monaco, {
 | `group` | String | `null` | Field to group by initially (applies grouping on load) |
 | `sort` | Object | `null` | Initial sort: `{ field: string, direction: 'asc'|'desc' }` |
 | `fixedColumns` | Number | `0` | Number of columns to freeze on the left side when scrolling horizontally |
+| `showHeaderSummary` | Boolean | `false` | Show summary row at top with aggregates for all visible data |
+| `showGroupSummary` | Boolean | `false` | Show summary row after each group with group aggregates |
 
 ### Virtual Scrolling Options
 
@@ -269,6 +272,25 @@ divTable.stopAutoFetch();
 
 Keep the first N columns fixed (frozen) on the left side while scrolling horizontally:
 
+**Visual Layout:**
+
+```
+┌──────────────────────────┬─────────────────────────────────────────────────┐
+│    FIXED SECTION         │              SCROLLABLE SECTION  ──────────►   │
+│  (stays in place)        │           (scrolls horizontally)               │
+├──────────────────────────┼─────────────────────────────────────────────────┤
+│  ☐  │  ID  │  Name       │  Email          │  Department  │  Status  │ ...│
+├──────────────────────────┼─────────────────────────────────────────────────┤
+│  ☐  │  1   │  John Doe   │  john@mail.com  │  Engineering │  Active  │    │
+│  ☐  │  2   │  Jane Smith │  jane@mail.com  │  Marketing   │  Active  │    │
+│  ☐  │  3   │  Bob Wilson │  bob@mail.com   │  Sales       │  Inactive│    │
+└──────────────────────────┴─────────────────────────────────────────────────┘
+        ▲                                    ▲
+        │                                    │
+   Columns 1-2                         Columns 3+ scroll
+   stay fixed                          left/right
+```
+
 ```javascript
 const divTable = new DivTable(monaco, {
   tableWidgetElement: document.getElementById('table-container'),
@@ -292,6 +314,90 @@ const divTable = new DivTable(monaco, {
 - Checkbox column (if enabled) is always part of the fixed section
 - Works with composite columns - each composite group counts as one column
 
+### Summary Rows (Aggregates)
+
+Display aggregate calculations in summary rows at the header level (grand totals) or after each group (subtotals):
+
+**Visual Layout:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ☐  │  Name          │  Department  │  Age   │      Salary             │
+├─────────────────────────────────────────────────────────────────────────┤
+│     │                │              │ 32 avg │    $385,000  ◄── Header Summary (Grand Total)
+├═════════════════════════════════════════════════════════════════════════┤
+│  ▼  │ Engineering (3)                                                   │  ◄── Group Header
+├─────────────────────────────────────────────────────────────────────────┤
+│  ☐  │ Alice Chen     │ Engineering  │   28   │     $95,000             │
+│  ☐  │ Bob Smith      │ Engineering  │   35   │    $120,000             │
+│  ☐  │ Carol Davis    │ Engineering  │   42   │    $110,000             │
+├─────────────────────────────────────────────────────────────────────────┤
+│     │                │              │ 35 avg │    $325,000  ◄── Group Summary (Subtotal)
+├═════════════════════════════════════════════════════════════════════════┤
+│  ▶  │ Marketing (2)                                       (collapsed)   │  ◄── Collapsed Group
+├─────────────────────────────────────────────────────────────────────────┤
+│     │                │              │ 27 avg │     $60,000  ◄── Summary visible even when collapsed
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+```javascript
+const divTable = new DivTable(monaco, {
+  tableWidgetElement: document.getElementById('table-container'),
+  columns: [
+    { field: 'id', label: 'ID', primaryKey: true },
+    { field: 'name', label: 'Name' },
+    { field: 'department', label: 'Department', groupable: true },
+    { 
+      field: 'salary', 
+      label: 'Salary',
+      align: 'right',  // Right-align numeric values
+      aggregate: 'sum',  // Calculate sum for this column
+      aggregateRender: (value) => `$${value.toLocaleString()}`  // Format aggregate value
+    },
+    {
+      field: 'age',
+      label: 'Age',
+      aggregate: 'avg',  // Calculate average
+      aggregateRender: (value) => `${value.toFixed(1)} avg`
+    }
+  ],
+  data: myData,
+  group: 'department',
+  showHeaderSummary: true,   // Show grand total row at top
+  showGroupSummary: true     // Show subtotal after each group
+});
+```
+
+**Aggregate Types:**
+
+| Type | Description |
+|------|-------------|
+| `sum` | Sum of all numeric values |
+| `avg` | Average of all numeric values |
+| `count` | Count of non-null values |
+| `min` | Minimum value |
+| `max` | Maximum value |
+
+**Column Configuration for Aggregates:**
+
+```javascript
+{
+  field: 'amount',
+  label: 'Amount',
+  align: 'right',           // Align cell content (applies to both data and summary cells)
+  aggregate: 'sum',          // Aggregate type: 'sum', 'avg', 'count', 'min', 'max'
+  aggregateRender: (value) => `$${value.toFixed(2)}`  // Custom formatting for aggregate value
+}
+```
+
+**Features:**
+
+- Summary rows remain visible even when groups are collapsed
+- Aggregates automatically update when data changes or filters are applied
+- Selection-aware: When rows are selected, aggregates reflect only selected data
+- Works with fixed columns layout
+- Supports custom formatting via `aggregateRender` function
+
 ## Column Configuration
 
 ### Basic Column
@@ -303,6 +409,7 @@ const divTable = new DivTable(monaco, {
   primaryKey: false,       // Is this the primary key? (required for one column)
   hidden: false,           // Hide column (default: false)
   groupable: true,         // Allow grouping by this column (default: true)
+  align: 'left',           // Text alignment: 'left', 'center', 'right' (default: 'left')
   render: (value, item) => `<strong>${value}</strong>` // Custom render function
 }
 ```

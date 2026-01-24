@@ -525,4 +525,274 @@ describe('DivTable', () => {
       expect(divTable.totalRecords).toBe(testData.length);
     });
   });
+
+  describe('aggregate columns', () => {
+    let aggregateData;
+    let aggregateColumns;
+
+    beforeEach(() => {
+      aggregateData = [
+        { id: 1, name: 'John', salary: 50000, city: 'NYC' },
+        { id: 2, name: 'Jane', salary: 60000, city: 'NYC' },
+        { id: 3, name: 'Bob', salary: 70000, city: 'LA' },
+        { id: 4, name: 'Alice', salary: 80000, city: 'LA' },
+        { id: 5, name: 'Charlie', salary: 90000, city: 'Chicago' }
+      ];
+
+      aggregateColumns = [
+        { field: 'id', label: 'ID', primaryKey: true },
+        { field: 'name', label: 'Name' },
+        { field: 'salary', label: 'Salary', aggregate: 'sum' },
+        { field: 'city', label: 'City', groupable: true }
+      ];
+    });
+
+    it('should detect aggregate columns', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: aggregateData
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      expect(divTable.hasAggregateColumns()).toBe(true);
+      expect(divTable.getAggregateColumns().length).toBe(1);
+      expect(divTable.getAggregateColumns()[0].field).toBe('salary');
+    });
+
+    it('should return false when no aggregate columns', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      expect(divTable.hasAggregateColumns()).toBe(false);
+      expect(divTable.getAggregateColumns().length).toBe(0);
+    });
+
+    it('should calculate sum aggregate', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: aggregateData
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const salaryColumn = aggregateColumns.find(c => c.field === 'salary');
+      const sum = divTable.calculateAggregate(salaryColumn, aggregateData);
+
+      expect(sum).toBe(350000); // 50000 + 60000 + 70000 + 80000 + 90000
+    });
+
+    it('should calculate average aggregate', () => {
+      const avgColumns = [
+        { field: 'id', label: 'ID', primaryKey: true },
+        { field: 'salary', label: 'Salary', aggregate: 'avg' }
+      ];
+
+      const options = {
+        tableWidgetElement: container,
+        columns: avgColumns,
+        data: aggregateData
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const salaryColumn = avgColumns.find(c => c.field === 'salary');
+      const avg = divTable.calculateAggregate(salaryColumn, aggregateData);
+
+      expect(avg).toBe(70000); // 350000 / 5
+    });
+
+    it('should calculate count aggregate', () => {
+      const countColumns = [
+        { field: 'id', label: 'ID', primaryKey: true },
+        { field: 'name', label: 'Name', aggregate: 'count' }
+      ];
+
+      const options = {
+        tableWidgetElement: container,
+        columns: countColumns,
+        data: aggregateData
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const nameColumn = countColumns.find(c => c.field === 'name');
+      const count = divTable.calculateAggregate(nameColumn, aggregateData);
+
+      expect(count).toBe(5);
+    });
+
+    it('should calculate min aggregate', () => {
+      const minColumns = [
+        { field: 'id', label: 'ID', primaryKey: true },
+        { field: 'salary', label: 'Salary', aggregate: 'min' }
+      ];
+
+      const options = {
+        tableWidgetElement: container,
+        columns: minColumns,
+        data: aggregateData
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const salaryColumn = minColumns.find(c => c.field === 'salary');
+      const min = divTable.calculateAggregate(salaryColumn, aggregateData);
+
+      expect(min).toBe(50000);
+    });
+
+    it('should calculate max aggregate', () => {
+      const maxColumns = [
+        { field: 'id', label: 'ID', primaryKey: true },
+        { field: 'salary', label: 'Salary', aggregate: 'max' }
+      ];
+
+      const options = {
+        tableWidgetElement: container,
+        columns: maxColumns,
+        data: aggregateData
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const salaryColumn = maxColumns.find(c => c.field === 'salary');
+      const max = divTable.calculateAggregate(salaryColumn, aggregateData);
+
+      expect(max).toBe(90000);
+    });
+
+    it('should return null for empty data', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: []
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const salaryColumn = aggregateColumns.find(c => c.field === 'salary');
+      const sum = divTable.calculateAggregate(salaryColumn, []);
+
+      expect(sum).toBe(null);
+    });
+
+    it('should handle null/undefined values in aggregation', () => {
+      const dataWithNulls = [
+        { id: 1, salary: 50000 },
+        { id: 2, salary: null },
+        { id: 3, salary: 70000 },
+        { id: 4, salary: undefined },
+        { id: 5, salary: 90000 }
+      ];
+
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: dataWithNulls
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const salaryColumn = aggregateColumns.find(c => c.field === 'salary');
+      const sum = divTable.calculateAggregate(salaryColumn, dataWithNulls);
+
+      expect(sum).toBe(210000); // 50000 + 70000 + 90000 (ignores null/undefined)
+    });
+
+    it('should render header summary row when enabled', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: aggregateData,
+        showHeaderSummary: true
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      const summaryRow = container.querySelector('.header-summary');
+      expect(summaryRow).not.toBeNull();
+      expect(summaryRow.classList.contains('summary-row')).toBe(true);
+    });
+
+    it('should not render header summary when disabled', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: aggregateData,
+        showHeaderSummary: false
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      const summaryRow = container.querySelector('.header-summary');
+      expect(summaryRow).toBeNull();
+    });
+
+    it('should render group summary rows when grouped', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: aggregateData,
+        showGroupSummary: true,
+        group: 'city'
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      
+      // Expand all groups to see group summaries
+      divTable.collapsedGroups.clear();
+      divTable.render();
+
+      const groupSummaries = container.querySelectorAll('.group-summary');
+      // Should have 3 group summaries (NYC, LA, Chicago)
+      expect(groupSummaries.length).toBe(3);
+    });
+
+    it('should format aggregate values with custom render function', () => {
+      const customColumns = [
+        { field: 'id', label: 'ID', primaryKey: true },
+        { 
+          field: 'salary', 
+          label: 'Salary', 
+          aggregate: 'sum',
+          aggregateRender: (value) => `$${value.toLocaleString()}`
+        }
+      ];
+
+      const options = {
+        tableWidgetElement: container,
+        columns: customColumns,
+        data: aggregateData,
+        showHeaderSummary: true
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      const salaryColumn = customColumns.find(c => c.field === 'salary');
+      const formatted = divTable.formatAggregateValue(350000, salaryColumn);
+
+      expect(formatted).toBe('$350,000');
+    });
+
+    it('should use selection-aware aggregation', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: aggregateColumns,
+        data: aggregateData,
+        showHeaderSummary: true
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      
+      // Select first two rows (salary: 50000 + 60000)
+      divTable.selectedRows.add('1');
+      divTable.selectedRows.add('2');
+      
+      const aggregationData = divTable.getAggregationDataSet(aggregateData);
+      const salaryColumn = aggregateColumns.find(c => c.field === 'salary');
+      const sum = divTable.calculateAggregate(salaryColumn, aggregationData);
+
+      expect(sum).toBe(110000); // Only selected rows
+    });
+  });
 });
