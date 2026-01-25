@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>DivTable Full Screen Demo</title>
+  <!-- DivTable Widget Component Styles -->
+  <link rel="stylesheet" href="../src/div-table.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+  <style>
+    /* Reset default margins and padding */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+
+    /* Full screen container */
+    .fullscreen-container {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 20px);
+      width: 100vw;
+    }
+
+    /* Header section */
+    .header {
+      flex-shrink: 0;
+      padding: 20px 30px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 600;
+    }
+
+    .header p {
+      margin: 8px 0 0 0;
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    /* Table container - takes remaining space */
+    .table-container {
+      flex: 1;
+      min-height: 0; /* Important for flexbox overflow */
+      padding: 20px;
+      background: #f5f5f5;
+      overflow: hidden;
+    }
+
+    /* Make the table widget fill the container */
+    .div-table-widget {
+      height: 100%;
+      width: 100%;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="fullscreen-container">
+    <!-- Header Section -->
+    <div class="header">
+      <h1>🚀 DivTable Full Screen Demo</h1>
+      <p>Table dynamically fills available space (100vh × 100vw)</p>
+    </div>
+
+    <!-- Table Container -->
+    <div class="table-container">
+      <div id="divtable" class="div-table-widget"></div>
+    </div>
+  </div>
+
+  <script src="../src/query.js"></script>
+  <script src="../src/div-table.js"></script>
+  <script type="module">
+    // Monaco Editor configuration
+    require.config({
+      paths: {
+        vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs"
+      }
+    });
+
+    require(["vs/editor/editor.main"], function () {
+      // Function to simulate loading data from server
+      function simulateDataFetch(page, pageSize) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            const startId = page * pageSize + 1;
+            const newData = [];
+
+            const cities = ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'Philadelphia', 'San Antonio', 'San Diego', 'Dallas', 'San Jose'];
+            const departments = ['Engineering', 'Marketing', 'Sales', 'Support', 'Finance', 'HR', 'Operations'];
+            const firstNames = ['John', 'Jane', 'Bob', 'Alice', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Henry'];
+            const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
+            const tagsArray = ['urgent', 'review', 'approved', 'pending', 'archived', 'active', 'inactive'];
+
+            for (let i = 0; i < pageSize; i++) {
+              const id = startId + i;
+              const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+              const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+              const city = cities[Math.floor(Math.random() * cities.length)];
+              const department = departments[Math.floor(Math.random() * departments.length)];
+              const age = Math.floor(Math.random() * 40) + 22;
+              const active = Math.random() > 0.3;
+              const tags = [tagsArray[Math.floor(Math.random() * tagsArray.length)]];
+              if (!active) {
+                tags.push(tagsArray[Math.floor(Math.random() * tagsArray.length)]);
+              }
+
+              newData.push({
+                id: id,
+                name: `${firstName} ${lastName}`,
+                age: age,
+                city: city,
+                department: department,
+                active: active,
+                tags,
+                technical: 5000 + id
+              });
+            }
+
+            // Limit to 1000 records for demo
+            if (startId > 1000) {
+              resolve([]);
+            } else {
+              resolve(newData);
+            }
+          }, 800 + Math.random() * 400); // Simulate network delay
+        });
+      }
+
+      // Column definitions
+      const columns = [
+        {
+          field: 'technical',
+          label: 'Technical ID',
+          hidden: true,
+          primaryKey: true
+        },
+        {
+          field: 'id',
+          label: 'ID',
+          type: 'number',
+          responsive: { priority: 'low', size: 'fixed-narrow', hideMobile: true },
+          groupable: false
+        },
+        {
+          field: 'name',
+          label: 'Name',
+          subLabel: 'Age',
+          subField: 'age',
+          subType: 'number',
+          subRender: (value) => value ? `${value} years old` : 'Age not specified',
+          responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
+          groupable: false
+        },
+        {
+          field: 'department',
+          label: 'Department',
+          responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+          groupable: true
+        },
+        {
+          field: 'tags',
+          label: 'Tags',
+          responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+          groupable: true
+        },
+        {
+          field: 'city',
+          label: 'City',
+          render: (value) => value ? `<a href="https://www.example.com?city=${encodeURIComponent(value)}" target="_blank" rel="noopener noreferrer">${value}</a>` : '',
+          responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+          groupable: true
+        },
+        {
+          field: 'active',
+          label: 'Status',
+          type: 'boolean',
+          render: (value) => {
+            if (value === true) return '✅ Active';
+            if (value === false) return '❌ Inactive';
+            return '';
+          },
+          responsive: { priority: 'high', size: 'flexible-small' },
+          groupable: true
+        }
+      ];
+
+      // Initialize the table
+      const divTableElement = document.getElementById('divtable');
+      
+      const table = new DivTable(monaco, {
+        tableWidgetElement: divTableElement,
+        data: null,
+        columns: columns,
+        showCheckboxes: true,
+        multiSelect: true,
+
+        // Virtual scrolling configuration
+        virtualScrolling: true,
+        pageSize: 100,
+        totalRecords: 1000,
+        loadingThreshold: 20,
+
+        // Show buttons
+        showRefreshButton: true,
+        showAutoFetchButton: true,
+        autoFetchDelay: 5000,
+
+        // Callbacks
+        onNextPage: async (page, pageSize) => {
+          console.log(`📄 Loading page ${page} (${pageSize} records per page)`);
+          return await simulateDataFetch(page, pageSize);
+        },
+
+        onSelectionChange: (rows) => {
+          console.log("📋 Selected rows:", rows.map(r => r?.name || 'No name').filter(Boolean));
+        },
+
+        onRowFocus: (row, group) => {
+          if (group) {
+            console.log("👁️ Group focused:", group);
+          } else if (row) {
+            console.log("👁️ Row focused:", row);
+          }
+        }
+      });
+
+      // Optional: Apply initial grouping after a delay
+      setTimeout(() => {
+        table.group('department');
+      }, 1000);
+
+      // Log for testing
+      console.log('✅ Full screen table initialized');
+      console.log('📐 Container height:', divTableElement.offsetHeight + 'px');
+      console.log('📐 Container width:', divTableElement.offsetWidth + 'px');
+    });
+  </script>
+</body>
+
+</html>

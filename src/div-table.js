@@ -352,6 +352,32 @@ class DivTable {
       this.scrollBodyContainer.scrollLeft = this.scrollHeaderContainer.scrollLeft;
       requestAnimationFrame(() => { isSyncingScroll = false; });
     });
+    
+    // Adjust fixed body padding for horizontal scrollbar height
+    this.adjustFixedBodyForHorizontalScrollbar();
+    
+    // Re-adjust on window resize
+    window.addEventListener('resize', () => {
+      this.adjustFixedBodyForHorizontalScrollbar();
+    });
+  }
+  
+  /**
+   * Adjust fixed body padding to account for horizontal scrollbar in scroll body
+   * This prevents row misalignment at the bottom when scrolled to the end
+   */
+  adjustFixedBodyForHorizontalScrollbar() {
+    if (!this.fixedBodyContainer || !this.scrollBodyContainer) return;
+    
+    // Calculate horizontal scrollbar height
+    const scrollbarHeight = this.scrollBodyContainer.offsetHeight - this.scrollBodyContainer.clientHeight;
+    
+    // Add padding to fixed body to compensate for scrollbar
+    if (scrollbarHeight > 0) {
+      this.fixedBodyContainer.style.paddingBottom = `${scrollbarHeight}px`;
+    } else {
+      this.fixedBodyContainer.style.paddingBottom = '';
+    }
   }
 
   getEffectiveFixedColumnCount() {
@@ -721,8 +747,25 @@ class DivTable {
       this.handleKeyDown(e);
     });
 
-    bodyContainer.addEventListener('focus', () => {
-      if (!this.focusedRowId) {
+    // Track whether focus came from keyboard (Tab) vs mouse click
+    // Only auto-focus to first record on Tab navigation, not mouse clicks
+    let lastInputWasKeyboard = false;
+    
+    bodyContainer.addEventListener('keydown', () => {
+      lastInputWasKeyboard = true;
+    }, { capture: true });
+    
+    bodyContainer.addEventListener('mousedown', () => {
+      lastInputWasKeyboard = false;
+    }, { capture: true });
+
+    // Use focusin to detect when focus enters the container
+    bodyContainer.addEventListener('focusin', (e) => {
+      // Only auto-focus to first record if:
+      // 1. There's no currently focused row
+      // 2. Focus came from keyboard navigation (Tab), not mouse click
+      // This prevents auto-scrolling when clicking the scrollbar
+      if (!this.focusedRowId && lastInputWasKeyboard && e.target === bodyContainer) {
         this.focusFirstRecord();
       }
     });
@@ -1288,15 +1331,17 @@ class DivTable {
       }
     });
 
-    // Update group header checkbox states
-    if (this.groupByField) {
+    // Update group header checkbox states (always check for group headers in DOM)
+    const groupHeaders = this.bodyContainer.querySelectorAll('.div-table-row.group-header');
+    if (groupHeaders.length > 0) {
+      // Group headers exist, so groupByField must be set - get the groups
       const groups = this.groupData(this.sortData(this.filteredData));
       
-      this.bodyContainer.querySelectorAll('.div-table-row.group-header').forEach((groupRow) => {
+      groupHeaders.forEach((groupRow) => {
         const checkbox = groupRow.querySelector('input[type="checkbox"]');
         if (!checkbox) return;
 
-        // Find the group by matching the groupKey instead of relying on index
+        // Find the group by matching the groupKey
         const groupKey = groupRow.dataset.groupKey;
         const group = groups.find(g => g.key === groupKey);
         if (!group) return;
@@ -1305,15 +1350,16 @@ class DivTable {
         const groupItemIds = group.items.map(item => String(item[this.primaryKeyField]));
         const selectedInGroup = groupItemIds.filter(id => this.selectedRows.has(id));
 
+        // Set indeterminate BEFORE checked to ensure proper visual update
         if (selectedInGroup.length === 0) {
-          checkbox.checked = false;
           checkbox.indeterminate = false;
+          checkbox.checked = false;
         } else if (selectedInGroup.length === groupItemIds.length) {
-          checkbox.checked = true;
           checkbox.indeterminate = false;
+          checkbox.checked = true;
         } else {
-          checkbox.checked = false;
           checkbox.indeterminate = true;
+          checkbox.checked = false;
         }
       });
     }
@@ -1351,11 +1397,13 @@ class DivTable {
       }
     });
     
-    // Update group header checkbox states
-    if (this.groupByField) {
+    // Update group header checkbox states (always check for group headers in DOM)
+    const groupHeaders = this.fixedBodyContainer.querySelectorAll('.div-table-row.group-header');
+    if (groupHeaders.length > 0) {
+      // Group headers exist, so groupByField must be set - get the groups
       const groups = this.groupData(this.sortData(this.filteredData));
       
-      this.fixedBodyContainer.querySelectorAll('.div-table-row.group-header').forEach((groupRow) => {
+      groupHeaders.forEach((groupRow) => {
         const checkbox = groupRow.querySelector('input[type="checkbox"]');
         if (!checkbox) return;
 
@@ -1366,15 +1414,16 @@ class DivTable {
         const groupItemIds = group.items.map(item => String(item[this.primaryKeyField]));
         const selectedInGroup = groupItemIds.filter(id => this.selectedRows.has(id));
 
+        // Set indeterminate BEFORE checked to ensure proper visual update
         if (selectedInGroup.length === 0) {
-          checkbox.checked = false;
           checkbox.indeterminate = false;
+          checkbox.checked = false;
         } else if (selectedInGroup.length === groupItemIds.length) {
-          checkbox.checked = true;
           checkbox.indeterminate = false;
+          checkbox.checked = true;
         } else {
-          checkbox.checked = false;
           checkbox.indeterminate = true;
+          checkbox.checked = false;
         }
       });
     }
@@ -1512,8 +1561,8 @@ class DivTable {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.addEventListener('change', (e) => {
-          if (e.target.checked || e.target.indeterminate) {
-            // If checked or indeterminate, select all
+          if (e.target.checked) {
+            // If checked, select all
             this.selectAll();
           } else {
             // If unchecked, clear selection
@@ -1594,7 +1643,7 @@ class DivTable {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.addEventListener('change', (e) => {
-          if (e.target.checked || e.target.indeterminate) {
+          if (e.target.checked) {
             this.selectAll();
           } else {
             this.clearSelection();
@@ -2393,6 +2442,11 @@ class DivTable {
         this.scrollBodyContainer.scrollLeft = scrollLeft;
       });
     }
+    
+    // Adjust fixed body padding for horizontal scrollbar (after content is rendered)
+    requestAnimationFrame(() => {
+      this.adjustFixedBodyForHorizontalScrollbar();
+    });
   }
 
   renderRegularRowsWithFixedColumns(dataToRender = this.filteredData) {
@@ -2802,14 +2856,19 @@ class DivTable {
     // Mark as populated
     row.dataset.populated = 'true';
     
-    // Remove min-height constraint and update estimated height
-    row.style.minHeight = '';
-    
-    // Measure actual height and update estimate for future rows (only once when height increases)
+    // Measure actual height and set it explicitly to prevent bouncing on re-renders
+    // Use requestAnimationFrame to ensure DOM has updated
     requestAnimationFrame(() => {
       const actualHeight = row.offsetHeight;
-      if (actualHeight > this.estimatedRowHeight) {
-        this.estimatedRowHeight = actualHeight;
+      if (actualHeight > 0) {
+        // Set explicit height to prevent layout recalculation bouncing
+        row.style.minHeight = `${actualHeight}px`;
+        row.style.height = `${actualHeight}px`;
+        
+        // Update estimate for future unpopulated rows
+        if (actualHeight > this.estimatedRowHeight) {
+          this.estimatedRowHeight = actualHeight;
+        }
       }
     });
     
@@ -2918,31 +2977,38 @@ class DivTable {
     fixedRow.dataset.populated = 'true';
     scrollRow.dataset.populated = 'true';
     
-    // Remove min-height constraints and synchronize row heights
-    fixedRow.style.minHeight = '';
-    scrollRow.style.minHeight = '';
-    
     // Synchronize heights between fixed and scroll row parts after cell population
+    // Use double requestAnimationFrame to ensure layout is fully complete
     requestAnimationFrame(() => {
-      // Reset any previously set explicit heights
-      fixedRow.style.height = '';
-      scrollRow.style.height = '';
-      
-      // Get natural heights after cell content is rendered
-      const fixedHeight = fixedRow.offsetHeight;
-      const scrollHeight = scrollRow.offsetHeight;
-      
-      // Set both to the maximum height
-      const maxHeight = Math.max(fixedHeight, scrollHeight);
-      if (maxHeight > 0) {
+      requestAnimationFrame(() => {
+        // Get natural heights after cell content is fully rendered
+        // Temporarily remove any height constraints to get true natural height
+        const prevFixedHeight = fixedRow.style.height;
+        const prevScrollHeight = scrollRow.style.height;
+        const prevFixedMinHeight = fixedRow.style.minHeight;
+        const prevScrollMinHeight = scrollRow.style.minHeight;
+        
+        fixedRow.style.height = '';
+        scrollRow.style.height = '';
+        fixedRow.style.minHeight = '40px';
+        scrollRow.style.minHeight = '40px';
+        
+        // Force layout recalculation
+        const fixedHeight = fixedRow.offsetHeight;
+        const scrollHeight = scrollRow.offsetHeight;
+        
+        // Set both to the maximum height to keep rows in sync
+        const maxHeight = Math.max(fixedHeight, scrollHeight, 40); // Ensure minimum 44px
+        fixedRow.style.minHeight = `${maxHeight}px`;
         fixedRow.style.height = `${maxHeight}px`;
+        scrollRow.style.minHeight = `${maxHeight}px`;
         scrollRow.style.height = `${maxHeight}px`;
-      }
-      
-      // Update estimated height for future rows
-      if (maxHeight > this.estimatedRowHeight) {
-        this.estimatedRowHeight = maxHeight;
-      }
+        
+        // Update estimate for future unpopulated rows
+        if (maxHeight > this.estimatedRowHeight) {
+          this.estimatedRowHeight = maxHeight;
+        }
+      });
     });
     
     // Update tab indexes after population
@@ -4115,10 +4181,15 @@ class DivTable {
   updateInfoSection() {
     if (!this.infoSection) return;
     
-    const total = this.virtualScrolling ? this.totalRecords : this.data.length;
+    // For virtual scrolling, use the max of totalRecords and actual loaded data
+    // This handles cases where loaded data exceeds the reported total
+    const total = this.virtualScrolling 
+      ? Math.max(this.totalRecords, this.data.length) 
+      : this.data.length;
     const loaded = this.data.length;
     const filtered = this.filteredData.length;
-    const selected = this.selectedRows.size;
+    // Count only valid selected rows (detail records, not stale IDs)
+    const selected = this.getValidSelectedCount();
     
     // Clear existing content
     this.infoSection.innerHTML = '';
@@ -4554,10 +4625,12 @@ class DivTable {
   updateInfoSectionWithAnticipatedProgress() {
     if (!this.infoSection || !this.virtualScrolling) return;
     
-    const total = this.totalRecords;
+    // Use max of totalRecords and actual loaded data to handle inconsistencies
+    const total = Math.max(this.totalRecords, this.data.length);
     const currentLoaded = this.data.length;
     const filtered = this.filteredData.length;
-    const selected = this.selectedRows.size;
+    // Count only valid selected rows (detail records, not stale IDs)
+    const selected = this.getValidSelectedCount();
     
     // Calculate anticipated progress (assume we'll get a full page of data)
     const anticipatedLoaded = Math.min(currentLoaded + this.pageSize, total);
@@ -4833,6 +4906,15 @@ class DivTable {
 
   getSelectedRows() {
     return Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean);
+  }
+
+  /**
+   * Get the count of selected rows that have valid data records
+   * This excludes any stale selections (IDs that no longer exist in data)
+   * @returns {number} The count of valid selected rows
+   */
+  getValidSelectedCount() {
+    return this.getSelectedRows().length;
   }
 
   /**

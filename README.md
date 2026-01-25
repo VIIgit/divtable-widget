@@ -26,6 +26,44 @@ A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML 
 npm install @vii7/div-table-widget monaco-editor
 ```
 
+## Usage Options
+
+### Option 1: Minified (Production)
+
+```html
+<!-- CSS -->
+<link rel="stylesheet" href="node_modules/@vii7/div-table-widget/dist/divtable.min.css">
+
+<!-- Monaco Editor (from CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+
+<!-- DivTable Widget -->
+<script src="node_modules/@vii7/div-table-widget/src/query.js"></script>
+<script src="node_modules/@vii7/div-table-widget/dist/divtable.min.js"></script>
+```
+
+### Option 2: Source (Development/Debugging)
+
+```html
+<!-- CSS -->
+<link rel="stylesheet" href="node_modules/@vii7/div-table-widget/src/div-table.css">
+
+<!-- Monaco Editor (from CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+
+<!-- DivTable Widget -->
+<script src="node_modules/@vii7/div-table-widget/src/query.js"></script>
+<script src="node_modules/@vii7/div-table-widget/src/div-table.js"></script>
+```
+
+| File | Size | Description |
+|------|------|-------------|
+| `dist/divtable.min.js` | ~98KB | Minified JavaScript |
+| `dist/divtable.min.css` | ~22KB | Minified CSS |
+| `src/div-table.js` | ~220KB | Source JavaScript |
+| `src/div-table.css` | ~33KB | Source CSS (with CSS variables) |
+| `src/query.js` | ~78KB | Query language engine (required) |
+
 ## Quick Start
 
 ### Basic Usage
@@ -34,14 +72,14 @@ npm install @vii7/div-table-widget monaco-editor
 <!DOCTYPE html>
 <html>
 <head>
-  <link rel="stylesheet" href="node_modules/divtable-widget/src/div-table.css">
+  <link rel="stylesheet" href="node_modules/@vii7/div-table-widget/dist/divtable.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
 </head>
 <body>
   <div id="table-container"></div>
   
-  <script src="node_modules/divtable-widget/src/query.js"></script>
-  <script src="node_modules/divtable-widget/src/div-table.js"></script>
+  <script src="node_modules/@vii7/div-table-widget/src/query.js"></script>
+  <script src="node_modules/@vii7/div-table-widget/dist/divtable.min.js"></script>
   <script>
     // Initialize Monaco Editor
     require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' }});
@@ -483,18 +521,99 @@ The widget automatically detects and handles different data types based on the d
 - **Booleans**: True/false values with = operator
 - **Arrays**: Array values are joined with commas for display
 
-## Styling
+## Styling & Customization
 
-The widget uses CSS variables for easy customization:
+The widget uses CSS custom properties (variables) for easy theming. Override these variables in your stylesheet to customize colors:
+
+### CSS Variables Reference
 
 ```css
-.div-table-widget {
-  --table-border-color: #e0e0e0;
-  --header-bg-color: #f5f5f5;
-  --row-hover-color: #f9f9f9;
-  --selected-row-color: #e3f2fd;
+:root {
+  /* Primary/Accent Colors */
+  --dt-primary: #007bff;              /* Main accent color */
+  --dt-primary-hover: #0056b3;        /* Accent hover state */
+  
+  /* Background Colors */
+  --dt-bg-base: #ffffff;              /* Base background */
+  --dt-bg-light: #f9f9f7;             /* Light background */
+  --dt-bg-hover: rgb(240, 247, 255);  /* Row hover background */
+  --dt-bg-selected: rgba(0, 123, 255, 0.1); /* Selected row background */
+  --dt-bg-header: #f9f9f7;            /* Header background */
+  --dt-bg-summary: #f8f9fa;           /* Summary row background */
+  
+  /* Border Colors */
+  --dt-border-light: #e9ecef;         /* Light borders */
+  --dt-border-medium: #e1e5e9;        /* Medium borders */
+  --dt-border-dark: #ced4da;          /* Dark borders */
+  --dt-border-row: #f1f3f4;           /* Row separator */
+  
+  /* Text Colors */
+  --dt-text-primary: #374151;         /* Primary text */
+  --dt-text-secondary: #495057;       /* Secondary text */
+  --dt-text-muted: #6b7280;           /* Muted/subtle text */
+  --dt-text-light: #666666;           /* Light text */
+  --dt-text-disabled: #999999;        /* Disabled text */
+  
+  /* Shadow */
+  --dt-shadow: rgba(0, 0, 0, 0.1);    /* Standard shadow */
+  
+  /* State Colors */
+  --dt-error: #dc3545;                /* Error color */
+  --dt-success: #28a745;              /* Success color */
+  --dt-warning: #ffc107;              /* Warning color */
+  --dt-info: #0ea5e9;                 /* Info color */
 }
 ```
+
+### Example: Dark Theme
+
+```css
+/* custom-theme.css */
+:root {
+  --dt-primary: #60a5fa;
+  --dt-primary-hover: #3b82f6;
+  
+  --dt-bg-base: #1f2937;
+  --dt-bg-light: #374151;
+  --dt-bg-hover: #4b5563;
+  --dt-bg-selected: rgba(96, 165, 250, 0.2);
+  --dt-bg-header: #374151;
+  --dt-bg-summary: #374151;
+  
+  --dt-border-light: #4b5563;
+  --dt-border-medium: #6b7280;
+  --dt-border-dark: #9ca3af;
+  --dt-border-row: #374151;
+  
+  --dt-text-primary: #f9fafb;
+  --dt-text-secondary: #e5e7eb;
+  --dt-text-muted: #9ca3af;
+  --dt-text-light: #d1d5db;
+  --dt-text-disabled: #6b7280;
+  --dt-text-inverse: #1f2937;
+  
+  --dt-shadow: rgba(0, 0, 0, 0.3);
+  
+  --dt-button-bg: #4b5563;
+  --dt-button-bg-hover: #6b7280;
+  --dt-button-text: #f9fafb;
+  
+  --dt-scrollbar-track: #374151;
+  --dt-scrollbar-thumb: #6b7280;
+  --dt-scrollbar-thumb-hover: #9ca3af;
+}
+```
+
+### Variable Categories
+
+| Category | Variables | Description |
+|----------|-----------|-------------|
+| Primary | `--dt-primary`, `--dt-primary-hover` | Brand/accent colors |
+| Background | `--dt-bg-*` | Surface and container backgrounds |
+| Border | `--dt-border-*` | Border and separator colors |
+| Text | `--dt-text-*` | Typography colors |
+| State | `--dt-error`, `--dt-success`, `--dt-warning`, `--dt-info` | Status indicator colors |
+| UI | `--dt-button-*`, `--dt-scrollbar-*` | Button and scrollbar styling |
 
 ## Browser Support
 

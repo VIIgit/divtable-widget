@@ -1,10 +1,11 @@
 const path = require('path');
-const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 
 module.exports = {
   entry: {
-    divtable: './src/div-table.js'
+    divtable: ['./src/div-table.js', './src/div-table.css']
   },
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -20,7 +21,7 @@ module.exports = {
     rules: [
       {
         test: /\.css$/,
-        use: ['style-loader', 'css-loader']
+        use: [MiniCssExtractPlugin.loader, 'css-loader']
       },
       {
         test: /\.ttf$/,
@@ -29,15 +30,8 @@ module.exports = {
     ]
   },
   plugins: [
-    new MonacoWebpackPlugin({
-      languages: ['javascript', 'typescript', 'json'],
-      features: [
-        'coreCommands',
-        'find',
-        'bracketMatching',
-        'suggest',
-        'hover'
-      ]
+    new MiniCssExtractPlugin({
+      filename: '[name].min.css'
     })
   ],
   optimization: {
@@ -50,7 +44,8 @@ module.exports = {
           }
         },
         extractComments: false
-      })
+      }),
+      new CssMinimizerPlugin()
     ]
   },
   resolve: {
