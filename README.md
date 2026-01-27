@@ -19,6 +19,7 @@ A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML 
 - **Keyboard Navigation**: Full keyboard accessibility with arrow key navigation
 - **Responsive Design**: Adaptive column sizing and mobile-friendly layout
 - **Composite Columns**: Stack multiple fields in one column or create two-line headers
+- **Dark Mode Support**: Built-in dark mode with a single class toggle
 
 ## Installation
 
@@ -27,6 +28,27 @@ npm install @vii7/div-table-widget monaco-editor
 ```
 
 ## Usage Options
+
+## Dark Mode
+
+DivTable supports a built-in dark mode using CSS variables. To enable dark mode, add the `dark` class to a parent element (such as `<body class="dark">`). All table colors and UI elements will automatically switch to a dark theme.
+
+**Example:**
+
+```html
+<body class="dark">
+  <div id="table-container"></div>
+  <!-- ... -->
+</body>
+```
+
+You can toggle dark mode dynamically by adding or removing the `dark` class with JavaScript:
+
+```js
+document.body.classList.toggle('dark');
+```
+
+All color variables are defined for both light and dark modes in the CSS. No extra configuration is needed.
 
 ### Option 1: Minified (Production)
 

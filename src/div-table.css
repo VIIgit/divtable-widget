@@ -96,6 +96,81 @@
   --dt-summary-border: #adb5bd;
 }
 
+/* Dark mode variables */
+.dark {
+  --dt-primary: #339cff;
+  --dt-primary-hover: #1976d2;
+  --dt-primary-light: rgba(51, 156, 255, 0.12);
+  --dt-primary-lighter: rgba(51, 156, 255, 0.07);
+  --dt-focus-ring: rgba(51, 156, 255, 0.18);
+
+  --dt-bg-base: #181c24;
+  --dt-bg-light: #232837;
+  --dt-bg-hover: #232b3b;
+  --dt-bg-selected: rgba(51, 156, 255, 0.12);
+  --dt-bg-header: #232837;
+  --dt-bg-summary: #232837;
+  --dt-bg-disabled: #22242b;
+
+  --dt-border-light: #232837;
+  --dt-border-medium: #2c3142;
+  --dt-border-dark: #3a3f51;
+  --dt-border-row: #232837;
+  --dt-border-focus: #339cff;
+  --dt-border-hover: #339cff;
+
+  --dt-text-primary: #e3e8ef;
+  --dt-text-secondary: #bfc7d5;
+  --dt-text-muted: #8a94a7;
+  --dt-text-light: #bfc7d5;
+  --dt-text-disabled: #6b7280;
+  --dt-text-inverse: #181c24;
+
+  --dt-shadow: rgba(0, 0, 0, 0.5);
+  --dt-shadow-medium: rgba(0, 0, 0, 0.6);
+  --dt-shadow-heavy: rgba(0, 0, 0, 0.7);
+
+  --dt-error: #ff5370;
+  --dt-error-light: rgba(255, 83, 112, 0.6);
+  --dt-error-hover: #d32f2f;
+  --dt-error-active: #b71c1c;
+  --dt-error-bg: #2d1a1e;
+  --dt-error-border: #ffb3c1;
+  --dt-error-text: #ff5370;
+  --dt-error-border-hover: rgba(255, 83, 112, 0.6);
+  --dt-error-focus-ring: rgba(255, 83, 112, 0.25);
+
+  --dt-success: #43e97b;
+  --dt-success-bg: #1b2b1b;
+  --dt-success-bg-hover: #234d23;
+
+  --dt-warning: #ffc107;
+  --dt-warning-bg: #2d261a;
+  --dt-warning-bg-hover: #4d3b1a;
+
+  --dt-info: #4fc3f7;
+  --dt-info-bg: #1a232d;
+  --dt-info-bg-hover: #1a2d3b;
+
+  --dt-button-bg: #232837;
+  --dt-button-bg-hover: #2c3142;
+  --dt-button-text: #e3e8ef;
+
+  --dt-scrollbar-track: #232837;
+  --dt-scrollbar-thumb: #2c3142;
+  --dt-scrollbar-thumb-hover: #3a3f51;
+
+  --dt-spinner-track: #2c3142;
+  --dt-spinner-active: #bfc7d5;
+
+  --dt-skeleton-base: #232837;
+  --dt-skeleton-shine: #2c3142;
+
+  --dt-group-bg: rgba(35, 40, 55, 0.5);
+
+  --dt-summary-border: #3a3f51;
+}
+
 /* Table widget container */
 .div-table-widget {
   width: 100%;
@@ -572,6 +647,7 @@
 
 /* Row styling - CSS Grid based */
 .div-table-row {
+  color: var(--dt-text-primary);
   display: grid;
   min-height: 40px;
   align-items: stretch;
