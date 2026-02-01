@@ -5,7 +5,8 @@ const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 
 module.exports = {
   entry: {
-    divtable: ['./src/div-table.js', './src/div-table.css']
+    divtable: ['./src/div-table.js', './src/div-table.css'],
+    'divtable-theme-dark': './src/div-table-theme-dark.css'
   },
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -13,7 +14,6 @@ module.exports = {
     library: {
       name: 'DivTable',
       type: 'umd',
-      export: 'default'
     },
     globalObject: 'this'
   },

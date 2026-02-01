@@ -1,6 +1,6 @@
 {
   "name": "@vii7/div-table-widget",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "A modern table widget built with CSS Grid and Flexbox, featuring Monaco Editor integration for advanced query capabilities",
   "main": "dist/divtable.min.js",
   "module": "src/div-table.js",
@@ -27,7 +27,9 @@
     "virtual-scrolling",
     "pagination",
     "sorting",
-    "grouping"
+    "grouping",
+    "theming",
+    "dark-mode"
   ],
   "author": "VIIgit",
   "license": "Apache-2.0",

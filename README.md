@@ -1,5 +1,14 @@
 # DivTable Widget
 
+**v1.2.0** — 2026-02-01
+
+**What's new:**
+
+- Fixed `.div-table-body` max-height calculation (now uses widget height minus toolbar and header)
+- Row heights between fixed and scroll sections are now always synchronized to the tallest row
+- No more cell overflow: the tallest cell in a row (including composite cells) sets the row height for both fixed and scroll sections
+
+
 A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML tables, featuring Monaco Editor integration for advanced query capabilities.
 
 ![alt](demo.gif)
@@ -29,26 +38,152 @@ npm install @vii7/div-table-widget monaco-editor
 
 ## Usage Options
 
-## Dark Mode
+## CDN Setup
 
-DivTable supports a built-in dark mode using CSS variables. To enable dark mode, add the `dark` class to a parent element (such as `<body class="dark">`). All table colors and UI elements will automatically switch to a dark theme.
+You can use DivTable Widget directly from a CDN for quick prototyping or embedding in static sites. The latest version is available via [jsDelivr](https://www.jsdelivr.com/package/npm/@vii7/div-table-widget).
 
-**Example:**
+**Example (CDN):**
 
 ```html
-<body class="dark">
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- DivTable CSS from CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vii7/div-table-widget@latest/src/div-table.css">
+  <!-- Monaco Editor (from CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+  <!-- DivTable Query Engine (from CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@vii7/div-table-widget@latest/src/query.js"></script>
+  <!-- DivTable Widget JS (from CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@vii7/div-table-widget@latest/src/div-table.js"></script>
+</head>
+<body>
   <div id="table-container"></div>
-  <!-- ... -->
+  <script>
+    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' }});
+    require(['vs/editor/editor.main'], function() {
+      const divTable = new DivTable(monaco, {
+        tableWidgetElement: document.getElementById('table-container'),
+        columns: [
+          { field: 'id', label: 'ID', primaryKey: true },
+          { field: 'name', label: 'Name' },
+          { field: 'email', label: 'Email' },
+          { field: 'status', label: 'Status' }
+        ],
+        data: [
+          { id: 1, name: 'John Doe', email: 'john@example.com', status: 'active' },
+          { id: 2, name: 'Jane Smith', email: 'jane@example.com', status: 'inactive' }
+        ]
+      });
+    });
+  </script>
+</body>
+</html>
+```
+
+This setup requires no build step—just copy and paste into your HTML file. Always use the latest version by referencing `@latest` in the CDN URL, or pin to a specific version for production stability.
+
+
+## Theming & Customization
+
+DivTable supports customizable themes via CSS variables. The base (light) theme is included by default; additional themes like dark mode can be enabled by including a theme CSS file and applying a class.
+
+### Available Themes
+
+| Theme | File | Class | Description |
+|-------|------|-------|-------------|
+| Light (default) | `div-table.css` | (none) | Default light theme, included automatically |
+| Dark | `div-table-theme-dark.css` | `.theme-dark` or `.dark` | Dark theme for low-light environments |
+
+### Enabling Dark Mode
+
+**Option 1: Static (include theme CSS file)**
+
+Include the dark theme CSS after the base CSS:
+
+```html
+<link rel="stylesheet" href="node_modules/@vii7/div-table-widget/dist/divtable.min.css">
+<link rel="stylesheet" href="node_modules/@vii7/div-table-widget/dist/divtable-theme-dark.min.css">
+<body class="theme-dark">
+  ...
 </body>
 ```
 
-You can toggle dark mode dynamically by adding or removing the `dark` class with JavaScript:
+**Option 2: Dynamic (toggle via JavaScript)**
+
+You can toggle dark mode dynamically by adding or removing the theme class with JavaScript:
 
 ```js
-document.body.classList.toggle('dark');
+// Enable dark mode
+document.body.classList.add('theme-dark');
+
+// Toggle dark mode
+document.body.classList.toggle('theme-dark');
+
+// Remove dark mode (back to light)
+document.body.classList.remove('theme-dark');
 ```
 
-All color variables are defined for both light and dark modes in the CSS. No extra configuration is needed.
+**CDN Example (Dark Mode):**
+
+```html
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vii7/div-table-widget@latest/src/div-table.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vii7/div-table-widget@latest/src/div-table-theme-dark.css">
+<body class="theme-dark">
+  ...
+</body>
+```
+
+### Creating Custom Themes
+
+You can create your own theme by overriding CSS variables. Copy the dark theme file as a starting point and customize the values:
+
+```css
+/* my-custom-theme.css */
+.theme-custom {
+  --dt-primary: #8b5cf6;
+  --dt-primary-hover: #7c3aed;
+  --dt-bg-base: #1e1b2e;
+  --dt-bg-light: #2d2a3e;
+  --dt-text-primary: #e2e0f0;
+  /* ... override more variables as needed */
+}
+```
+
+Then include and activate your custom theme:
+
+```html
+<link rel="stylesheet" href="div-table.css">
+<link rel="stylesheet" href="my-custom-theme.css">
+<body class="theme-custom">
+  ...
+</body>
+```
+
+### CSS Variables Reference
+
+All theme colors are defined as CSS custom properties (variables) in `:root`. Override these in your custom theme class:
+
+| Variable | Description |
+|----------|-------------|
+| `--dt-primary` | Primary/accent color |
+| `--dt-bg-base` | Base background color |
+| `--dt-bg-light` | Light background (header, toolbar) |
+| `--dt-bg-hover` | Row hover background |
+| `--dt-bg-selected` | Selected row background |
+| `--dt-border-light` | Light border color |
+| `--dt-border-medium` | Medium border color |
+| `--dt-text-primary` | Primary text color |
+| `--dt-text-secondary` | Secondary text color |
+| `--dt-text-muted` | Muted/disabled text |
+| `--dt-button-bg` | Button background |
+| `--dt-button-text` | Button text color |
+| `--dt-error` | Error state color |
+| `--dt-success` | Success state color |
+| `--dt-warning` | Warning state color |
+| `--dt-info` | Info state color |
+
+See `src/div-table.css` for the full list of available variables.
 
 ### Option 1: Minified (Production)
 
@@ -81,9 +216,11 @@ All color variables are defined for both light and dark modes in the CSS. No ext
 | File | Size | Description |
 |------|------|-------------|
 | `dist/divtable.min.js` | ~98KB | Minified JavaScript |
-| `dist/divtable.min.css` | ~22KB | Minified CSS |
+| `dist/divtable.min.css` | ~22KB | Minified CSS (base theme) |
+| `dist/divtable-theme-dark.min.css` | ~2KB | Minified dark theme (optional) |
 | `src/div-table.js` | ~220KB | Source JavaScript |
 | `src/div-table.css` | ~33KB | Source CSS (with CSS variables) |
+| `src/div-table-theme-dark.css` | ~3KB | Source dark theme (optional) |
 | `src/query.js` | ~78KB | Query language engine (required) |
 
 ## Quick Start
@@ -109,10 +246,10 @@ All color variables are defined for both light and dark modes in the CSS. No ext
       const divTable = new DivTable(monaco, {
         tableWidgetElement: document.getElementById('table-container'),
         columns: [
-          { field: 'id', header: 'ID', primaryKey: true },
-          { field: 'name', header: 'Name' },
-          { field: 'email', header: 'Email' },
-          { field: 'status', header: 'Status' }
+          { field: 'id', label: 'ID', primaryKey: true },
+          { field: 'name', label: 'Name' },
+          { field: 'email', label: 'Email' },
+          { field: 'status', label: 'Status' }
         ],
         data: [
           { id: 1, name: 'John Doe', email: 'john@example.com', status: 'active' },
@@ -139,9 +276,9 @@ All color variables are defined for both light and dark modes in the CSS. No ext
 const divTable = new DivTable(monaco, {
   tableWidgetElement: document.getElementById('table-container'),
   columns: [
-    { field: 'id', header: 'ID', primaryKey: true },
-    { field: 'name', header: 'Name' },
-    { field: 'age', header: 'Age' }
+    { field: 'id', label: 'ID', primaryKey: true },
+    { field: 'name', label: 'Name' },
+    { field: 'age', label: 'Age' }
   ],
   virtualScrolling: true,
   pageSize: 100,
@@ -355,11 +492,11 @@ Keep the first N columns fixed (frozen) on the left side while scrolling horizon
 const divTable = new DivTable(monaco, {
   tableWidgetElement: document.getElementById('table-container'),
   columns: [
-    { field: 'id', header: 'ID', primaryKey: true },
-    { field: 'name', header: 'Name' },
-    { field: 'email', header: 'Email' },
-    { field: 'department', header: 'Department' },
-    { field: 'status', header: 'Status' }
+    { field: 'id', label: 'ID', primaryKey: true },
+    { field: 'name', label: 'Name' },
+    { field: 'email', label: 'Email' },
+    { field: 'department', label: 'Department' },
+    { field: 'status', label: 'Status' }
   ],
   data: myData,
   fixedColumns: 2  // Freeze first 2 columns (ID and Name)

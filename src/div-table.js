@@ -1712,12 +1712,21 @@ class DivTable {
       fixedRow.style.height = '';
       scrollRow.style.height = '';
       
-      // Get natural heights
-      const fixedHeight = fixedRow.offsetHeight;
-      const scrollHeight = scrollRow.offsetHeight;
+      // Get natural heights including any cell content overflow
+      const fixedHeight = Math.max(fixedRow.offsetHeight, fixedRow.scrollHeight);
+      const scrollHeight = Math.max(scrollRow.offsetHeight, scrollRow.scrollHeight);
+      
+      // Also check individual cell heights
+      let maxCellHeight = 0;
+      fixedRow.querySelectorAll('.div-table-cell').forEach(cell => {
+        maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
+      });
+      scrollRow.querySelectorAll('.div-table-cell').forEach(cell => {
+        maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
+      });
       
       // Set both to the maximum height
-      const maxHeight = Math.max(fixedHeight, scrollHeight);
+      const maxHeight = Math.max(fixedHeight, scrollHeight, maxCellHeight);
       if (maxHeight > 0) {
         fixedRow.style.height = `${maxHeight}px`;
         scrollRow.style.height = `${maxHeight}px`;
@@ -1893,7 +1902,6 @@ class DivTable {
       mainLabel.className = 'composite-main-header';
       mainLabel.innerHTML = col.label || col.field;
       mainLabel.style.fontWeight = '600';
-      mainLabel.style.color = '#374151';
       mainLabel.style.textAlign = 'left';
       mainLabel.style.flex = '1';
       mainLabelContainer.appendChild(mainLabel);
@@ -1960,7 +1968,6 @@ class DivTable {
       
       const subLabel = document.createElement('span');
       subLabel.innerHTML = col.subLabel;
-      subLabel.style.color = '#6b7280';
       subLabel.style.textAlign = 'left';
       subLabel.style.flex = '1';
       subLabelContainer.appendChild(subLabel);
@@ -1980,9 +1987,9 @@ class DivTable {
         
         subLabelContainer.appendChild(subSortIndicator);
         
-        // Add hover effect
+        // Add hover effect - use CSS variable for theming support
         subLabelContainer.addEventListener('mouseenter', () => {
-          subLabelContainer.style.backgroundColor = '#f3f4f6';
+          subLabelContainer.style.backgroundColor = 'var(--dt-bg-disabled)';
         });
         subLabelContainer.addEventListener('mouseleave', () => {
           subLabelContainer.style.backgroundColor = 'transparent';
@@ -2765,9 +2772,6 @@ class DivTable {
       
       if (composite.compositeName) {
         cell.classList.add('composite-cell');
-        cell.style.display = 'flex';
-        cell.style.flexDirection = 'column';
-        cell.style.gap = '4px';
         
         composite.columns.forEach((col, index) => {
           const subCell = document.createElement('div');
@@ -2855,22 +2859,6 @@ class DivTable {
 
     // Mark as populated
     row.dataset.populated = 'true';
-    
-    // Measure actual height and set it explicitly to prevent bouncing on re-renders
-    // Use requestAnimationFrame to ensure DOM has updated
-    requestAnimationFrame(() => {
-      const actualHeight = row.offsetHeight;
-      if (actualHeight > 0) {
-        // Set explicit height to prevent layout recalculation bouncing
-        row.style.minHeight = `${actualHeight}px`;
-        row.style.height = `${actualHeight}px`;
-        
-        // Update estimate for future unpopulated rows
-        if (actualHeight > this.estimatedRowHeight) {
-          this.estimatedRowHeight = actualHeight;
-        }
-      }
-    });
     
     // Update tab indexes after population
     this.updateTabIndexes();
@@ -2981,32 +2969,28 @@ class DivTable {
     // Use double requestAnimationFrame to ensure layout is fully complete
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        // Get natural heights after cell content is fully rendered
-        // Temporarily remove any height constraints to get true natural height
-        const prevFixedHeight = fixedRow.style.height;
-        const prevScrollHeight = scrollRow.style.height;
-        const prevFixedMinHeight = fixedRow.style.minHeight;
-        const prevScrollMinHeight = scrollRow.style.minHeight;
-        
+        // Reset any fixed heights to get natural content height
         fixedRow.style.height = '';
         scrollRow.style.height = '';
-        fixedRow.style.minHeight = '40px';
-        scrollRow.style.minHeight = '40px';
         
-        // Force layout recalculation
-        const fixedHeight = fixedRow.offsetHeight;
-        const scrollHeight = scrollRow.offsetHeight;
+        // Get the maximum height from both rows, including any cell content
+        // Use scrollHeight to capture content that might overflow
+        const fixedHeight = Math.max(fixedRow.offsetHeight, fixedRow.scrollHeight);
+        const scrollHeight = Math.max(scrollRow.offsetHeight, scrollRow.scrollHeight);
         
-        // Set both to the maximum height to keep rows in sync
-        const maxHeight = Math.max(fixedHeight, scrollHeight, 40); // Ensure minimum 44px
-        fixedRow.style.minHeight = `${maxHeight}px`;
-        fixedRow.style.height = `${maxHeight}px`;
-        scrollRow.style.minHeight = `${maxHeight}px`;
-        scrollRow.style.height = `${maxHeight}px`;
+        // Also check individual cell heights
+        let maxCellHeight = 0;
+        fixedRow.querySelectorAll('.div-table-cell').forEach(cell => {
+          maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
+        });
+        scrollRow.querySelectorAll('.div-table-cell').forEach(cell => {
+          maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
+        });
         
-        // Update estimate for future unpopulated rows
-        if (maxHeight > this.estimatedRowHeight) {
-          this.estimatedRowHeight = maxHeight;
+        const maxHeight = Math.max(fixedHeight, scrollHeight, maxCellHeight);
+        if (maxHeight > 0) {
+          fixedRow.style.height = `${maxHeight}px`;
+          scrollRow.style.height = `${maxHeight}px`;
         }
       });
     });
@@ -3206,9 +3190,6 @@ class DivTable {
       if (composite.compositeName) {
         // Composite cell with multiple columns stacked vertically
         cell.classList.add('composite-cell');
-        cell.style.display = 'flex';
-        cell.style.flexDirection = 'column';
-        cell.style.gap = '4px';
         
         composite.columns.forEach((col, index) => {
           const subCell = document.createElement('div');
@@ -3586,9 +3567,6 @@ class DivTable {
     if (composite.compositeName) {
       // Composite cell with multiple columns stacked vertically
       cell.classList.add('composite-cell');
-      cell.style.display = 'flex';
-      cell.style.flexDirection = 'column';
-      cell.style.gap = '4px';
       
       composite.columns.forEach((col, index) => {
         const subCell = document.createElement('div');
