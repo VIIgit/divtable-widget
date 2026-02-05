@@ -1,6 +1,6 @@
 # DivTable Widget
 
-**v1.2.0** — 2026-02-01
+**v1.2.1** — 2026-02-05
 
 **What's new:**
 
@@ -803,6 +803,20 @@ limitations under the License.
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Changelog
+
+### Version 1.2.1 (2026-02-05)
+
+- Patch release with internal improvements
+
+### Version 1.2.0 (2026-02-01)
+
+- Fixed `.div-table-body` max-height calculation (now uses widget height minus toolbar and header)
+- Row heights between fixed and scroll sections are now always synchronized to the tallest row
+- Fixed cell overflow: the tallest cell in a row (including composite cells) sets the row height for both sections
+- Fixed `align: 'right'` column configuration not being applied in all rendering paths
+- Added tooltips to data cells and composite sub-cells showing full cell content
+- Added tooltips to column headers showing the full label text
+- HTML tags (e.g., `<br>`) are now stripped from tooltips for cleaner display
 
 ### Version 1.0.0
 

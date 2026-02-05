@@ -113,6 +113,20 @@ class DivTable {
     }
   }
 
+  /**
+   * Strip HTML tags from a string for use in tooltips
+   * @param {string} html - String potentially containing HTML
+   * @returns {string} Plain text without HTML tags
+   */
+  stripHtmlTags(html) {
+    if (!html) return '';
+    // Replace <br> and <br/> with space, then strip all other HTML tags
+    return String(html)
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]*>/g, '')
+      .trim();
+  }
+
   init() {
     const container = this.options.tableWidgetElement;
     if (!container) {
@@ -1901,6 +1915,7 @@ class DivTable {
       const mainLabel = document.createElement('span');
       mainLabel.className = 'composite-main-header';
       mainLabel.innerHTML = col.label || col.field;
+      mainLabel.title = this.stripHtmlTags(col.label || col.field);
       mainLabel.style.fontWeight = '600';
       mainLabel.style.textAlign = 'left';
       mainLabel.style.flex = '1';
@@ -1924,7 +1939,7 @@ class DivTable {
         groupIndicator.textContent = this.groupByField === col.field ? '☴' : '☷';
         groupIndicator.style.cursor = 'pointer';
         groupIndicator.style.fontSize = '1em';
-        const columnTitle = col.label || col.field;
+        const columnTitle = this.stripHtmlTags(col.label || col.field);
         groupIndicator.title = this.groupByField === col.field ? `Grouped by ${columnTitle} (click to ungroup)` : `Click to group by ${columnTitle}`;
         
         // Add click handler for grouping
@@ -1968,6 +1983,7 @@ class DivTable {
       
       const subLabel = document.createElement('span');
       subLabel.innerHTML = col.subLabel;
+      subLabel.title = this.stripHtmlTags(col.subLabel);
       subLabel.style.textAlign = 'left';
       subLabel.style.flex = '1';
       subLabelContainer.appendChild(subLabel);
@@ -2060,6 +2076,7 @@ class DivTable {
       // Column label
       const labelSpan = document.createElement('span');
       labelSpan.innerHTML = columnLabel;
+      labelSpan.title = this.stripHtmlTags(columnLabel);
       //labelSpan.style.fontWeight = 'bold';
       leftContent.appendChild(labelSpan);
       
@@ -2070,12 +2087,13 @@ class DivTable {
       countSpan.style.opacity = '0.8';
       countSpan.style.fontSize = '0.9em';
       countSpan.style.fontWeight = 'normal';
-      countSpan.title = `${groupCount} distinct value${groupCount === 1 ? '' : 's'} in ${columnLabel}`;
+      countSpan.title = `${groupCount} distinct value${groupCount === 1 ? '' : 's'} in ${this.stripHtmlTags(columnLabel)}`;
       leftContent.appendChild(countSpan);
     } else {
       // Regular column label
       const labelSpan = document.createElement('span');
       labelSpan.innerHTML = col.label || col.field;
+      labelSpan.title = this.stripHtmlTags(col.label || col.field);
       //labelSpan.style.fontWeight = 'bold';
       leftContent.appendChild(labelSpan);
     }
@@ -2096,7 +2114,7 @@ class DivTable {
       groupIndicator.textContent = this.groupByField === col.field ? '☴' : '☷';
       groupIndicator.style.cursor = 'pointer';
       groupIndicator.style.fontSize = '1em';
-      const columnTitle = col.label || col.field;
+      const columnTitle = this.stripHtmlTags(col.label || col.field);
       groupIndicator.title = this.groupByField === col.field ? `Grouped by ${columnTitle} (click to ungroup)` : `Click to group by ${columnTitle}`;
       
       // Add click handler for grouping
@@ -2222,6 +2240,7 @@ class DivTable {
         // Column label
         const labelSpan = document.createElement('span');
         labelSpan.innerHTML = columnLabel;
+        labelSpan.title = this.stripHtmlTags(columnLabel);
         leftContent.appendChild(labelSpan);
         
         // Group count
@@ -2231,12 +2250,13 @@ class DivTable {
         groupCountSpan.style.opacity = '0.8';
         groupCountSpan.style.fontSize = '0.9em';
         groupCountSpan.style.fontWeight = 'normal';
-        groupCountSpan.title = `${groupCount} distinct value${groupCount === 1 ? '' : 's'} in ${columnLabel}`;
+        groupCountSpan.title = `${groupCount} distinct value${groupCount === 1 ? '' : 's'} in ${this.stripHtmlTags(columnLabel)}`;
         leftContent.appendChild(groupCountSpan);
       } else {
         // Regular label (not grouped)
         const labelSpan = document.createElement('span');
         labelSpan.innerHTML = col.label || col.field;
+        labelSpan.title = this.stripHtmlTags(col.label || col.field);
         leftContent.appendChild(labelSpan);
       }
       
@@ -2258,7 +2278,7 @@ class DivTable {
         groupIndicator.textContent = this.groupByField === col.field ? '☴' : '☷';
         groupIndicator.style.cursor = 'pointer';
         groupIndicator.style.fontSize = '1em';
-        const columnTitle = col.label || col.field;
+        const columnTitle = this.stripHtmlTags(col.label || col.field);
         groupIndicator.title = this.groupByField === col.field ? `Grouped by ${columnTitle} (click to ungroup)` : `Click to group by ${columnTitle}`;
         
         groupIndicator.addEventListener('click', (e) => {
@@ -2765,95 +2785,9 @@ class DivTable {
       row.appendChild(checkboxCell);
     }
 
-    // Data columns - render using composite structure
+    // Data columns - render using composite structure with proper alignment
     compositeColumns.forEach(composite => {
-      const cell = document.createElement('div');
-      cell.className = 'div-table-cell';
-      
-      if (composite.compositeName) {
-        cell.classList.add('composite-cell');
-        
-        composite.columns.forEach((col, index) => {
-          const subCell = document.createElement('div');
-          subCell.className = 'composite-sub-cell';
-          
-          if (this.groupByField && col.field === this.groupByField) {
-            subCell.classList.add('grouped-column');
-            subCell.textContent = '';
-          } else {
-            if (col.subField) {
-              subCell.classList.add('composite-column');
-              subCell.style.display = 'flex';
-              subCell.style.flexDirection = 'column';
-              subCell.style.gap = '2px';
-              
-              const mainDiv = document.createElement('div');
-              mainDiv.className = 'composite-main';
-              if (typeof col.render === 'function') {
-                mainDiv.innerHTML = col.render(item[col.field], item);
-              } else {
-                mainDiv.innerHTML = item[col.field] ?? '';
-              }
-              
-              const subDiv = document.createElement('div');
-              subDiv.className = 'composite-sub';
-              if (typeof col.subRender === 'function') {
-                subDiv.innerHTML = col.subRender(item[col.subField], item);
-              } else {
-                subDiv.innerHTML = item[col.subField] ?? '';
-              }
-              
-              subCell.appendChild(mainDiv);
-              subCell.appendChild(subDiv);
-            } else {
-              if (typeof col.render === 'function') {
-                subCell.innerHTML = col.render(item[col.field], item);
-              } else {
-                subCell.innerHTML = item[col.field] ?? '';
-              }
-            }
-          }
-          
-          cell.appendChild(subCell);
-        });
-      } else {
-        const col = composite.columns[0];
-        
-        if (this.groupByField && col.field === this.groupByField) {
-          cell.classList.add('grouped-column');
-          cell.textContent = '';
-        } else {
-          if (col.subField) {
-            cell.classList.add('composite-column');
-            
-            const mainDiv = document.createElement('div');
-            mainDiv.className = 'composite-main';
-            if (typeof col.render === 'function') {
-              mainDiv.innerHTML = col.render(item[col.field], item);
-            } else {
-              mainDiv.innerHTML = item[col.field] ?? '';
-            }
-            
-            const subDiv = document.createElement('div');
-            subDiv.className = 'composite-sub';
-            if (typeof col.subRender === 'function') {
-              subDiv.innerHTML = col.subRender(item[col.subField], item);
-            } else {
-              subDiv.innerHTML = item[col.subField] ?? '';
-            }
-            
-            cell.appendChild(mainDiv);
-            cell.appendChild(subDiv);
-          } else {
-            if (typeof col.render === 'function') {
-              cell.innerHTML = col.render(item[col.field], item);
-            } else {
-              cell.innerHTML = item[col.field] ?? '';
-            }
-          }
-        }
-      }
-      
+      const cell = this.createCellForComposite(composite, item);
       row.appendChild(cell);
     });
 
@@ -3182,103 +3116,9 @@ class DivTable {
       row.appendChild(checkboxCell);
     }
 
-    // Data columns - render using composite structure
+    // Data columns - render using composite structure with proper alignment
     compositeColumns.forEach(composite => {
-      const cell = document.createElement('div');
-      cell.className = 'div-table-cell';
-      
-      if (composite.compositeName) {
-        // Composite cell with multiple columns stacked vertically
-        cell.classList.add('composite-cell');
-        
-        composite.columns.forEach((col, index) => {
-          const subCell = document.createElement('div');
-          subCell.className = 'composite-sub-cell';
-          
-          // For grouped column, show empty
-          if (this.groupByField && col.field === this.groupByField) {
-            subCell.classList.add('grouped-column');
-            subCell.textContent = '';
-          } else {
-            // Check if this column has subField (vertical stacking within the sub-cell)
-            if (col.subField) {
-              subCell.classList.add('composite-column');
-              subCell.style.display = 'flex';
-              subCell.style.flexDirection = 'column';
-              subCell.style.gap = '2px';
-              
-              const mainDiv = document.createElement('div');
-              mainDiv.className = 'composite-main';
-              if (typeof col.render === 'function') {
-                mainDiv.innerHTML = col.render(item[col.field], item);
-              } else {
-                mainDiv.innerHTML = item[col.field] ?? '';
-              }
-              
-              const subDiv = document.createElement('div');
-              subDiv.className = 'composite-sub';
-              if (typeof col.subRender === 'function') {
-                subDiv.innerHTML = col.subRender(item[col.subField], item);
-              } else {
-                subDiv.innerHTML = item[col.subField] ?? '';
-              }
-              
-              subCell.appendChild(mainDiv);
-              subCell.appendChild(subDiv);
-            } else {
-              // Regular rendering
-              if (typeof col.render === 'function') {
-                subCell.innerHTML = col.render(item[col.field], item);
-              } else {
-                subCell.innerHTML = item[col.field] ?? '';
-              }
-            }
-          }
-          
-          cell.appendChild(subCell);
-        });
-      } else {
-        // Single column
-        const col = composite.columns[0];
-        
-        // For grouped column, show empty
-        if (this.groupByField && col.field === this.groupByField) {
-          cell.classList.add('grouped-column');
-          cell.textContent = '';
-        } else {
-          // Check if this is a composite column with subField (vertical stacking)
-          if (col.subField) {
-            cell.classList.add('composite-column');
-            
-            const mainDiv = document.createElement('div');
-            mainDiv.className = 'composite-main';
-            if (typeof col.render === 'function') {
-              mainDiv.innerHTML = col.render(item[col.field], item);
-            } else {
-              mainDiv.innerHTML = item[col.field] ?? '';
-            }
-            
-            const subDiv = document.createElement('div');
-            subDiv.className = 'composite-sub';
-            if (typeof col.subRender === 'function') {
-              subDiv.innerHTML = col.subRender(item[col.subField], item);
-            } else {
-              subDiv.innerHTML = item[col.subField] ?? '';
-            }
-            
-            cell.appendChild(mainDiv);
-            cell.appendChild(subDiv);
-          } else {
-            // Regular column rendering
-            if (typeof col.render === 'function') {
-              cell.innerHTML = col.render(item[col.field], item);
-            } else {
-              cell.innerHTML = item[col.field] ?? '';
-            }
-          }
-        }
-      }
-      
+      const cell = this.createCellForComposite(composite, item);
       row.appendChild(cell);
     });
 
@@ -3589,6 +3429,8 @@ class DivTable {
             } else {
               mainDiv.innerHTML = item[col.field] ?? '';
             }
+            // Set title for tooltip on main content
+            mainDiv.title = this.stripHtmlTags(mainDiv.innerHTML);
             
             const subDiv = document.createElement('div');
             subDiv.className = 'composite-sub';
@@ -3597,6 +3439,8 @@ class DivTable {
             } else {
               subDiv.innerHTML = item[col.subField] ?? '';
             }
+            // Set title for tooltip on sub content
+            subDiv.title = this.stripHtmlTags(subDiv.innerHTML);
             
             subCell.appendChild(mainDiv);
             subCell.appendChild(subDiv);
@@ -3606,6 +3450,8 @@ class DivTable {
             } else {
               subCell.innerHTML = item[col.field] ?? '';
             }
+            // Set title for tooltip on sub-cell
+            subCell.title = this.stripHtmlTags(subCell.innerHTML);
           }
         }
         
@@ -3629,6 +3475,8 @@ class DivTable {
           } else {
             mainDiv.innerHTML = item[col.field] ?? '';
           }
+          // Set title for tooltip on main content
+          mainDiv.title = this.stripHtmlTags(mainDiv.innerHTML);
           
           const subDiv = document.createElement('div');
           subDiv.className = 'composite-sub';
@@ -3637,15 +3485,23 @@ class DivTable {
           } else {
             subDiv.innerHTML = item[col.subField] ?? '';
           }
+          // Set title for tooltip on sub content
+          subDiv.title = this.stripHtmlTags(subDiv.innerHTML);
           
           cell.appendChild(mainDiv);
           cell.appendChild(subDiv);
         } else {
+          // Wrap content in a span for proper flex alignment
+          const contentSpan = document.createElement('span');
+          contentSpan.className = 'cell-content';
           if (typeof col.render === 'function') {
-            cell.innerHTML = col.render(item[col.field], item);
+            contentSpan.innerHTML = col.render(item[col.field], item);
           } else {
-            cell.innerHTML = item[col.field] ?? '';
+            contentSpan.innerHTML = item[col.field] ?? '';
           }
+          // Set title for tooltip
+          contentSpan.title = this.stripHtmlTags(contentSpan.innerHTML);
+          cell.appendChild(contentSpan);
         }
       }
     }
@@ -5836,6 +5692,10 @@ class DivTable {
             const formattedValue = this.formatAggregateValue(aggregateValue, col);
             subCell.innerHTML = formattedValue;
             subCell.classList.add('aggregate-value');
+            // Apply column alignment
+            if (col.align) {
+              subCell.style.textAlign = col.align;
+            }
           }
           
           cell.appendChild(subCell);
@@ -5844,10 +5704,21 @@ class DivTable {
         // Single column
         const col = composite.columns[0];
         
+        // Apply column alignment
+        if (col.align) {
+          cell.style.textAlign = col.align;
+          cell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
+                                       col.align === 'center' ? 'center' : 'flex-start';
+        }
+        
         if (col.aggregate) {
           const aggregateValue = this.calculateAggregate(col, aggregationData);
           const formattedValue = this.formatAggregateValue(aggregateValue, col);
-          cell.innerHTML = formattedValue;
+          // Wrap in span for proper flex alignment
+          const contentSpan = document.createElement('span');
+          contentSpan.className = 'cell-content';
+          contentSpan.innerHTML = formattedValue;
+          cell.appendChild(contentSpan);
           cell.classList.add('aggregate-value');
         }
       }
@@ -5925,6 +5796,10 @@ class DivTable {
             const formattedValue = this.formatAggregateValue(aggregateValue, col);
             subCell.innerHTML = formattedValue;
             subCell.classList.add('aggregate-value');
+            // Apply column alignment
+            if (col.align) {
+              subCell.style.textAlign = col.align;
+            }
           }
           
           cell.appendChild(subCell);
@@ -5932,10 +5807,21 @@ class DivTable {
       } else {
         const col = composite.columns[0];
         
+        // Apply column alignment
+        if (col.align) {
+          cell.style.textAlign = col.align;
+          cell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
+                                       col.align === 'center' ? 'center' : 'flex-start';
+        }
+        
         if (col.aggregate) {
           const aggregateValue = this.calculateAggregate(col, groupData);
           const formattedValue = this.formatAggregateValue(aggregateValue, col);
-          cell.innerHTML = formattedValue;
+          // Wrap in span for proper flex alignment
+          const contentSpan = document.createElement('span');
+          contentSpan.className = 'cell-content';
+          contentSpan.innerHTML = formattedValue;
+          cell.appendChild(contentSpan);
           cell.classList.add('aggregate-value');
         }
       }
@@ -6113,7 +5999,11 @@ class DivTable {
       if (col.aggregate) {
         const aggregateValue = this.calculateAggregate(col, data);
         const formattedValue = this.formatAggregateValue(aggregateValue, col);
-        cell.innerHTML = formattedValue;
+        // Wrap in span for proper flex alignment
+        const contentSpan = document.createElement('span');
+        contentSpan.className = 'cell-content';
+        contentSpan.innerHTML = formattedValue;
+        cell.appendChild(contentSpan);
         cell.classList.add('aggregate-value');
       }
     }

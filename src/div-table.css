@@ -604,6 +604,13 @@
   box-sizing: border-box;
 }
 
+/* Cell content wrapper for proper alignment */
+.div-table-cell .cell-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Header cell styling */
 .div-table-header-cell {
   padding: 8px 12px;
