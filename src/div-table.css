@@ -1387,7 +1387,7 @@ input[type="checkbox"]:indeterminate::after {
 }
 
 .div-table-scroll-row.focused {
-  box-shadow: none;
+  box-shadow: none !important;
 }
 
 .div-table-fixed-row.focused:hover,
