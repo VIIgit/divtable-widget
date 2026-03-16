@@ -28,6 +28,12 @@ class DivTable {
     this.onSelectionChange = options.onSelectionChange || (() => {});
     this.onRowFocus = options.onRowFocus || (() => {});
     
+    // Group collapse option: controls whether groups start collapsed (default: true for backward compat)
+    this.groupCollapsed = options.groupCollapsed !== false;
+    
+    // Custom group header render function
+    this.groupRender = options.groupRender || null;
+    
     // Loading placeholder option
     this.showLoadingPlaceholder = options.showLoadingPlaceholder !== false;
     this.isLoadingState = this.data.length === 0 && this.showLoadingPlaceholder; // Show loading when no initial data and enabled
@@ -1631,7 +1637,7 @@ class DivTable {
     }
     
     fixedColumns.forEach(composite => {
-      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+      fixedGridTemplate += this.getColumnGridSize(composite, true) + ' ';
     });
     
     this.fixedHeaderContainer.style.gridTemplateColumns = fixedGridTemplate.trim();
@@ -1831,7 +1837,7 @@ class DivTable {
     }
   }
 
-  getColumnGridSize(composite) {
+  getColumnGridSize(composite, isFixedContainer = false) {
     const firstCol = composite.columns[0];
     const responsive = firstCol.responsive || {};
     switch (responsive.size) {
@@ -1840,13 +1846,13 @@ class DivTable {
       case 'fixed-medium':
         return '120px';
       case 'flexible-small':
-        return '1fr';
+        return isFixedContainer ? 'minmax(80px, 150px)' : '1fr';
       case 'flexible-medium':
-        return '2fr';
+        return isFixedContainer ? 'minmax(100px, 200px)' : '2fr';
       case 'flexible-large':
-        return '3fr';
+        return isFixedContainer ? 'minmax(120px, 280px)' : '3fr';
       default:
-        return '1fr';
+        return isFixedContainer ? 'minmax(100px, 200px)' : '1fr';
     }
   }
 
@@ -3176,7 +3182,7 @@ class DivTable {
       fixedGridTemplate = '40px ';
     }
     fixedColumns.forEach(composite => {
-      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+      fixedGridTemplate += this.getColumnGridSize(composite, true) + ' ';
     });
     fixedRow.style.gridTemplateColumns = fixedGridTemplate.trim();
     
@@ -3523,7 +3529,7 @@ class DivTable {
       fixedGridTemplate = '40px ';
     }
     fixedColumns.forEach(composite => {
-      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+      fixedGridTemplate += this.getColumnGridSize(composite, true) + ' ';
     });
     fixedGroupHeader.style.gridTemplateColumns = fixedGridTemplate.trim();
     
@@ -3640,22 +3646,36 @@ class DivTable {
     
     fixedLabelCell.appendChild(toggleBtn);
     
-    const textSpan = document.createElement('span');
-    if (typeof renderedGroupValue === 'string') {
-      textSpan.innerHTML = renderedGroupValue;
+    if (this.groupRender) {
+      // Custom group header rendering
+      const customSpan = document.createElement('span');
+      customSpan.innerHTML = this.groupRender({
+        field: this.groupByField,
+        value: group.value,
+        displayValue: renderedGroupValue,
+        count: group.items.length,
+        items: group.items,
+        collapsed: this.collapsedGroups.has(group.key)
+      });
+      fixedLabelCell.appendChild(customSpan);
     } else {
-      textSpan.textContent = renderedGroupValue;
+      const textSpan = document.createElement('span');
+      if (typeof renderedGroupValue === 'string') {
+        textSpan.innerHTML = renderedGroupValue;
+      } else {
+        textSpan.textContent = renderedGroupValue;
+      }
+      fixedLabelCell.appendChild(textSpan);
+      
+      const countSpan = document.createElement('span');
+      countSpan.className = 'group-item-count';
+      countSpan.innerHTML = `(${group.items.length})`;
+      countSpan.style.opacity = '0.8';
+      countSpan.style.fontSize = '0.9em';
+      countSpan.style.fontWeight = 'normal';
+      countSpan.title = `${group.items.length} item${group.items.length === 1 ? '' : 's'} in this group`;
+      fixedLabelCell.appendChild(countSpan);
     }
-    fixedLabelCell.appendChild(textSpan);
-    
-    const countSpan = document.createElement('span');
-    countSpan.className = 'group-item-count';
-    countSpan.innerHTML = `(${group.items.length})`;
-    countSpan.style.opacity = '0.8';
-    countSpan.style.fontSize = '0.9em';
-    countSpan.style.fontWeight = 'normal';
-    countSpan.title = `${group.items.length} item${group.items.length === 1 ? '' : 's'} in this group`;
-    fixedLabelCell.appendChild(countSpan);
     
     fixedGroupHeader.appendChild(fixedLabelCell);
     
@@ -3854,25 +3874,38 @@ class DivTable {
     
     cell.appendChild(toggleBtn);
     
-    // Create a span for the group text that can handle HTML
-    const textSpan = document.createElement('span');
-    //textSpan.style.fontWeight = '500';
-    if (typeof renderedGroupValue === 'string') {
-      textSpan.innerHTML = renderedGroupValue;
+    if (this.groupRender) {
+      // Custom group header rendering
+      const customSpan = document.createElement('span');
+      customSpan.innerHTML = this.groupRender({
+        field: this.groupByField,
+        value: group.value,
+        displayValue: renderedGroupValue,
+        count: group.items.length,
+        items: group.items,
+        collapsed: this.collapsedGroups.has(group.key)
+      });
+      cell.appendChild(customSpan);
     } else {
-      textSpan.textContent = renderedGroupValue;
+      // Create a span for the group text that can handle HTML
+      const textSpan = document.createElement('span');
+      if (typeof renderedGroupValue === 'string') {
+        textSpan.innerHTML = renderedGroupValue;
+      } else {
+        textSpan.textContent = renderedGroupValue;
+      }
+      cell.appendChild(textSpan);
+      
+      // Add styled count span
+      const countSpan = document.createElement('span');
+      countSpan.className = 'group-item-count';
+      countSpan.innerHTML = `(${group.items.length})`;
+      countSpan.style.opacity = '0.8';
+      countSpan.style.fontSize = '0.9em';
+      countSpan.style.fontWeight = 'normal';
+      countSpan.title = `${group.items.length} item${group.items.length === 1 ? '' : 's'} in this group`;
+      cell.appendChild(countSpan);
     }
-    cell.appendChild(textSpan);
-    
-    // Add styled count span
-    const countSpan = document.createElement('span');
-    countSpan.className = 'group-item-count';
-    countSpan.innerHTML = `(${group.items.length})`;
-    countSpan.style.opacity = '0.8';
-    countSpan.style.fontSize = '0.9em';
-    countSpan.style.fontWeight = 'normal';
-    countSpan.title = `${group.items.length} item${group.items.length === 1 ? '' : 's'} in this group`;
-    cell.appendChild(countSpan);
     
     groupRow.appendChild(cell);
 
@@ -4641,14 +4674,16 @@ class DivTable {
     this.groupByField = field || null;
     
     if (field) {
-      // When grouping is enabled, start with all groups collapsed
+      // When grouping is enabled, collapse/expand based on groupCollapsed option (default: collapsed)
       this.collapsedGroups.clear();
       
-      // Get all groups to populate the collapsed set
-      const groups = this.groupData(this.filteredData);
-      groups.forEach(group => {
-        this.collapsedGroups.add(group.key);
-      });
+      if (this.groupCollapsed) {
+        // Get all groups to populate the collapsed set
+        const groups = this.groupData(this.filteredData);
+        groups.forEach(group => {
+          this.collapsedGroups.add(group.key);
+        });
+      }
     } else {
       // When grouping is disabled, clear collapsed groups
       this.collapsedGroups.clear();
@@ -5851,7 +5886,7 @@ class DivTable {
     }
     
     fixedColumns.forEach(composite => {
-      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+      fixedGridTemplate += this.getColumnGridSize(composite, true) + ' ';
     });
     
     fixedSummary.style.gridTemplateColumns = fixedGridTemplate.trim();
@@ -5917,7 +5952,7 @@ class DivTable {
     }
     
     fixedColumns.forEach(composite => {
-      fixedGridTemplate += this.getColumnGridSize(composite) + ' ';
+      fixedGridTemplate += this.getColumnGridSize(composite, true) + ' ';
     });
     
     fixedSummary.style.gridTemplateColumns = fixedGridTemplate.trim();

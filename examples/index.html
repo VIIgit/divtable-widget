@@ -328,7 +328,7 @@
             {
               field: 'name',
               label: 'Name',
-              responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
+              responsive: { priority: 'high', size: 'flexible-large', allowWrap: true },
               groupable: false,
               fieldCompositeName: 'person'
             },
@@ -344,13 +344,13 @@
             {
               field: 'department',
               label: 'Department',
-              responsive: { priority: 'medium', size: 'flexible-small', allowWrap: true },
+              responsive: { priority: 'medium', size: 'flexible-large', allowWrap: true },
               groupable: true
             },
             {
               field: 'tags',
               label: 'Tags',
-              responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+              responsive: { priority: 'medium', size: 'flexible-small', allowWrap: true },
               groupable: true
             },
             {
@@ -466,6 +466,7 @@
       const refreshBtn = document.getElementById('programmaticRefreshBtn');
       const statusDiv = document.getElementById('refreshStatus');
 
+      if (!refreshBtn) return; // Button not present in page
       refreshBtn.addEventListener('click', async () => {
         try {
           // Disable button and show loading state

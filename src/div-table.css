@@ -1381,11 +1381,13 @@ input[type="checkbox"]:indeterminate::after {
   background-color: var(--dt-bg-selected) !important;
 }
 
-/* Focused state for split rows */
-.div-table-fixed-row.focused,
-.div-table-scroll-row.focused {
-  background-color: var(--dt-bg-base);
+/* Focused state for split rows — only the fixed side shows the inset indicator */
+.div-table-fixed-row.focused {
   box-shadow: inset 3px 0 0 var(--dt-primary);
+}
+
+.div-table-scroll-row.focused {
+  box-shadow: none;
 }
 
 .div-table-fixed-row.focused:hover,
