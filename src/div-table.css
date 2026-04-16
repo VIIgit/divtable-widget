@@ -698,6 +698,7 @@
 /* Always show active sort indicator */
 .sort-indicator.active {
   opacity: 1 !important;
+  background: var(--dt-bg-light);
 }
 
 /* Legacy: Sort indicator in header-right-content - hidden by default */
@@ -948,13 +949,15 @@ input[type="checkbox"]:indeterminate::after {
 }
 
 .composite-sub-header {
+  position: relative;
   cursor: pointer;
   user-select: none;
-  padding: 0;
+  padding: 0 40px 0 0;
   border-radius: 4px;
   transition: background-color 0.2s ease;
   min-width: 0;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .composite-sub-header:first-child {
@@ -970,6 +973,46 @@ input[type="checkbox"]:indeterminate::after {
 
 .composite-sub-header:hover {
   background-color: var(--dt-bg-disabled);
+}
+
+/* Absolutely positioned right-side icons in composite sub-header */
+.composite-sub-header .sub-header-icons {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--dt-header-bg);
+  padding-left: 4px;
+}
+
+.composite-sub-header:hover .sub-header-icons {
+  background-color: var(--dt-bg-disabled);
+}
+
+/* Absolutely positioned sub-sort indicator in composite sub-header (legacy subLabel pattern) */
+.composite-sub-header > .sub-sort-indicator {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: var(--dt-header-bg);
+  padding-left: 4px;
+}
+
+.composite-sub-header:hover > .sub-sort-indicator {
+  background-color: var(--dt-bg-disabled);
+}
+
+/* Show sort/group indicators on hover of composite sub-header */
+.composite-sub-header:hover .sort-indicator {
+  opacity: 0.5;
+}
+
+.composite-sub-header:hover .group-indicator {
+  opacity: 0.5;
 }
 
 /* Composite toggle button styling */

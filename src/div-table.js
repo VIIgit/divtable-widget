@@ -827,6 +827,24 @@ class DivTable {
   }
 
   handleKeyDown(e) {
+    // Ctrl+A / Cmd+A: Select all filtered rows
+    if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+      e.preventDefault();
+      this.selectAll();
+      if (!this.showCheckboxes) {
+        // Also mark all for copy so Ctrl+C copies everything
+        this._copyMarkedAll = true;
+      }
+      return;
+    }
+
+    // Ctrl+C / Cmd+C: Copy rows as CSV to clipboard
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      e.preventDefault();
+      this.copyRowsAsCsv();
+      return;
+    }
+
     const focusableElements = this.getAllFocusableElements();
     if (focusableElements.length === 0) return;
 
@@ -949,6 +967,10 @@ class DivTable {
     if (row.classList.contains('group-header')) {
       this.focusedRowId = null;
       this.focusedGroupKey = row.dataset.groupKey;
+      if (this._copyMarkedAll && !this.showCheckboxes) {
+        this.clearSelection();
+      }
+      this._copyMarkedAll = false;
       
       // Only trigger callback if this is a different group than last time
       if (this._lastFocusCallback.groupKey !== row.dataset.groupKey) {
@@ -971,6 +993,13 @@ class DivTable {
         }
       }
     } else if (row.dataset.id) {
+      // Clear copy-all mark when focus moves to a different row
+      if (this.focusedRowId !== row.dataset.id) {
+        if (this._copyMarkedAll && !this.showCheckboxes) {
+          this.clearSelection();
+        }
+        this._copyMarkedAll = false;
+      }
       this.focusedRowId = row.dataset.id;
       this.focusedGroupKey = null;
       
@@ -1046,6 +1075,48 @@ class DivTable {
       
       // Update our internal focus tracking
       this.updateFocusState(groupRow);
+    }
+  }
+
+  /**
+   * Copy rows as CSV to clipboard with RFC 4180 escaping.
+   * Header row is always included. Arrays are joined with comma before escaping.
+   * Priority: _copyMarkedAll (all filtered) > selected rows > focused row only.
+   */
+  copyRowsAsCsv() {
+    let rows;
+    if (this._copyMarkedAll) {
+      rows = this.filteredData;
+    } else if (this.selectedRows.size > 0) {
+      rows = this.getSelectedRows();
+    } else if (this.focusedRowId) {
+      const focusedData = this.findRowData(this.focusedRowId);
+      rows = focusedData ? [focusedData] : [];
+    } else {
+      return;
+    }
+    if (rows.length === 0) return;
+
+    const columns = this.columns.filter(col => !col.hidden);
+
+    const escapeCsvValue = (val) => {
+      if (val === null || val === undefined) return '';
+      if (Array.isArray(val)) val = val.join(',');
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const header = columns.map(col => escapeCsvValue(col.label || col.field)).join(',');
+    const dataRows = rows.map(item =>
+      columns.map(col => escapeCsvValue(item[col.field])).join(',')
+    );
+    const csv = [header, ...dataRows].join('\n');
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(csv);
     }
   }
 
@@ -1497,6 +1568,9 @@ class DivTable {
           if (checkbox) {
             checkbox.setAttribute('tabindex', '0');
           }
+        } else {
+          // For group headers without checkboxes, make the row itself focusable
+          row.setAttribute('tabindex', '0');
         }
       } else if (row.dataset.id) {
         // For data rows, check if their group is collapsed
@@ -1509,6 +1583,9 @@ class DivTable {
           if (checkbox) {
             checkbox.setAttribute('tabindex', isVisible ? '0' : '-1');
           }
+        } else {
+          // When no checkboxes, make the row itself focusable
+          row.setAttribute('tabindex', isVisible ? '0' : '-1');
         }
       }
     }
@@ -2268,11 +2345,9 @@ class DivTable {
       
       subHeader.appendChild(leftContent);
       
-      // Right-aligned content wrapper
+      // Right-aligned content wrapper (absolutely positioned via CSS)
       const rightContent = document.createElement('div');
-      rightContent.style.display = 'flex';
-      rightContent.style.alignItems = 'center';
-      rightContent.style.gap = '4px';
+      rightContent.className = 'sub-header-icons';
       
       // Grouping indicator
       if (col.groupable !== false && !col.hidden) {
