@@ -2608,17 +2608,23 @@ class DivTable {
     }
     
     // Synchronize column widths and row heights between fixed and scroll sections.
-    // When lazy rendering is active, defer sync until after cells are populated
-    // (via _schedulePostPopulateSync triggered by IntersectionObserver) to avoid
-    // syncing on empty shells and then re-syncing on populated cells.
-    if (!this.lazyCellRendering) {
+    // When lazy rendering is active, eagerly populate visible rows first so the
+    // initial sync measures real content — not empty shells. The IntersectionObserver
+    // then handles only off-screen rows, eliminating the double-render flash.
+    if (this.lazyCellRendering) {
+      this._populateVisibleRowsEagerly();
+      // Cancel any pending async sync queued during eager population —
+      // we're about to sync synchronously right now.
+      if (this._postPopulateSyncTimer) {
+        cancelAnimationFrame(this._postPopulateSyncTimer);
+        this._postPopulateSyncTimer = null;
+      }
       this.syncFixedColumnsColumnWidths();
       this.syncFixedColumnsRowHeights();
-    }
-    
-    // Setup lazy cell rendering observer if enabled
-    if (this.lazyCellRendering) {
       this.setupLazyRenderingObserver();
+    } else {
+      this.syncFixedColumnsColumnWidths();
+      this.syncFixedColumnsRowHeights();
     }
     
     // Restore horizontal scroll position after rendering
@@ -2788,6 +2794,38 @@ class DivTable {
     }
   }
   
+  /**
+   * Eagerly populate rows that are currently visible in the viewport.
+   * Called synchronously during renderBodyWithFixedColumns so the first paint
+   * shows fully populated rows with correct column widths / row heights.
+   */
+  _populateVisibleRowsEagerly() {
+    const container = this.fixedColumns > 0 ? this.scrollBodyContainer : this.bodyContainer;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const rows = container.querySelectorAll('.div-table-row[data-populated="false"]');
+
+    rows.forEach(row => {
+      const rowRect = row.getBoundingClientRect();
+      // Row is visible if it overlaps the container viewport
+      if (rowRect.bottom >= containerRect.top && rowRect.top <= containerRect.bottom) {
+        const rowId = row.dataset.id;
+        const item = this.findRowData(rowId);
+        if (item) {
+          if (this.fixedColumns > 0) {
+            const fixedRow = this.fixedBodyContainer.querySelector(`.div-table-row[data-id="${rowId}"]`);
+            if (fixedRow) {
+              this.populateRowCellsWithFixedColumns(fixedRow, row, item);
+            }
+          } else {
+            this.populateRowCells(row, item);
+          }
+        }
+      }
+    });
+  }
+
   /**
    * Fallback method to populate all unpopulated rows (when IntersectionObserver not available)
    */
