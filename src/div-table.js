@@ -1852,20 +1852,20 @@ class DivTable {
     const scrollRows = this.scrollBodyContainer.querySelectorAll('.div-table-row');
     
     if (fixedRows.length !== scrollRows.length) return;
-    
-    fixedRows.forEach((fixedRow, index) => {
-      const scrollRow = scrollRows[index];
-      if (!scrollRow) return;
-      
-      // Reset heights first
+
+    // --- Reset phase: clear all explicit heights so we measure natural sizes ---
+    fixedRows.forEach((fixedRow, i) => {
       fixedRow.style.height = '';
-      scrollRow.style.height = '';
-      
-      // Get natural heights including any cell content overflow
+      scrollRows[i].style.height = '';
+    });
+
+    // --- Read phase: measure all natural heights ---
+    const heights = [];
+    fixedRows.forEach((fixedRow, i) => {
+      const scrollRow = scrollRows[i];
       const fixedHeight = Math.max(fixedRow.offsetHeight, fixedRow.scrollHeight);
       const scrollHeight = Math.max(scrollRow.offsetHeight, scrollRow.scrollHeight);
-      
-      // Also check individual cell heights
+
       let maxCellHeight = 0;
       fixedRow.querySelectorAll('.div-table-cell').forEach(cell => {
         maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
@@ -1873,12 +1873,15 @@ class DivTable {
       scrollRow.querySelectorAll('.div-table-cell').forEach(cell => {
         maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
       });
-      
-      // Set both to the maximum height
-      const maxHeight = Math.max(fixedHeight, scrollHeight, maxCellHeight);
-      if (maxHeight > 0) {
-        fixedRow.style.height = `${maxHeight}px`;
-        scrollRow.style.height = `${maxHeight}px`;
+
+      heights.push(Math.max(fixedHeight, scrollHeight, maxCellHeight));
+    });
+
+    // --- Write phase: apply all heights ---
+    fixedRows.forEach((fixedRow, i) => {
+      if (heights[i] > 0) {
+        fixedRow.style.height = `${heights[i]}px`;
+        scrollRows[i].style.height = `${heights[i]}px`;
       }
     });
   }
@@ -1895,7 +1898,10 @@ class DivTable {
     const headerCells = Array.from(this.scrollHeaderInner.querySelectorAll('.div-table-header-cell'));
     const bodyRows = Array.from(this.scrollBodyContainer.querySelectorAll('.div-table-row:not(.group-header)'));
     
-    // Calculate max width for each column
+    // Calculate max natural content width for each column.
+    // To avoid the +4 padding accumulating on repeated syncs, we measure
+    // content width via a temporary off-flow probe rather than scrollWidth
+    // on grid-constrained cells.
     const columnWidths = [];
     
     for (let colIndex = 0; colIndex < numColumns; colIndex++) {
@@ -1903,24 +1909,18 @@ class DivTable {
       
       // Check header cell
       if (headerCells[colIndex]) {
-        // Reset any previously set width
-        headerCells[colIndex].style.minWidth = '';
-        headerCells[colIndex].style.width = '';
-        maxWidth = Math.max(maxWidth, headerCells[colIndex].scrollWidth);
+        maxWidth = Math.max(maxWidth, this._measureCellContentWidth(headerCells[colIndex]));
       }
       
       // Check all body row cells
       bodyRows.forEach(row => {
         const cells = row.querySelectorAll('.div-table-cell');
         if (cells[colIndex]) {
-          // Reset any previously set width
-          cells[colIndex].style.minWidth = '';
-          cells[colIndex].style.width = '';
-          maxWidth = Math.max(maxWidth, cells[colIndex].scrollWidth);
+          maxWidth = Math.max(maxWidth, this._measureCellContentWidth(cells[colIndex]));
         }
       });
       
-      // Add some padding for comfortable reading
+      // Add padding for comfortable reading
       columnWidths.push(maxWidth + 4);
     }
     
@@ -1964,6 +1964,38 @@ class DivTable {
     } else {
       this.fixedSection.classList.remove('has-scroll-shadow');
     }
+  }
+
+  /**
+   * Measure a cell's natural content width independent of grid constraints.
+   * Clones the cell into an off-flow container so the grid template doesn't
+   * influence the measurement, preventing the +4 padding from accumulating.
+   */
+  _measureCellContentWidth(cell) {
+    // Fast path: if cell has no children, use scrollWidth directly
+    if (!cell.firstChild) return cell.scrollWidth;
+    
+    // Use a reusable off-screen measurement container
+    if (!this._measureContainer) {
+      this._measureContainer = document.createElement('div');
+      this._measureContainer.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden;white-space:nowrap;display:inline-block;';
+    }
+    
+    // Temporarily append to body for measurement
+    if (!this._measureContainer.parentNode) {
+      document.body.appendChild(this._measureContainer);
+    }
+    
+    // Copy cell content (innerHTML is faster than cloneNode for simple cells)
+    this._measureContainer.className = cell.className;
+    this._measureContainer.innerHTML = cell.innerHTML;
+    
+    const width = this._measureContainer.scrollWidth;
+    
+    // Clean up content but leave container attached for reuse
+    this._measureContainer.innerHTML = '';
+    
+    return width;
   }
 
   getColumnGridSize(composite, isFixedContainer = false) {
@@ -2526,7 +2558,7 @@ class DivTable {
   renderBodyWithFixedColumns() {
     // Preserve horizontal scroll position before clearing
     const scrollLeft = this.scrollBodyContainer?.scrollLeft || 0;
-    
+
     this.fixedBodyContainer.innerHTML = '';
     this.scrollBodyContainer.innerHTML = '';
 
@@ -2575,11 +2607,14 @@ class DivTable {
       this.scrollBodyContainer.insertBefore(scrollSummary, this.scrollBodyContainer.firstChild);
     }
     
-    // Synchronize column widths in scroll section (must be done before row heights)
-    this.syncFixedColumnsColumnWidths();
-    
-    // Synchronize row heights between fixed and scroll sections
-    this.syncFixedColumnsRowHeights();
+    // Synchronize column widths and row heights between fixed and scroll sections.
+    // When lazy rendering is active, defer sync until after cells are populated
+    // (via _schedulePostPopulateSync triggered by IntersectionObserver) to avoid
+    // syncing on empty shells and then re-syncing on populated cells.
+    if (!this.lazyCellRendering) {
+      this.syncFixedColumnsColumnWidths();
+      this.syncFixedColumnsRowHeights();
+    }
     
     // Setup lazy cell rendering observer if enabled
     if (this.lazyCellRendering) {
@@ -3027,35 +3062,8 @@ class DivTable {
     fixedRow.dataset.populated = 'true';
     scrollRow.dataset.populated = 'true';
     
-    // Synchronize heights between fixed and scroll row parts after cell population
-    // Use double requestAnimationFrame to ensure layout is fully complete
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        // Reset any fixed heights to get natural content height
-        fixedRow.style.height = '';
-        scrollRow.style.height = '';
-        
-        // Get the maximum height from both rows, including any cell content
-        // Use scrollHeight to capture content that might overflow
-        const fixedHeight = Math.max(fixedRow.offsetHeight, fixedRow.scrollHeight);
-        const scrollHeight = Math.max(scrollRow.offsetHeight, scrollRow.scrollHeight);
-        
-        // Also check individual cell heights
-        let maxCellHeight = 0;
-        fixedRow.querySelectorAll('.div-table-cell').forEach(cell => {
-          maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
-        });
-        scrollRow.querySelectorAll('.div-table-cell').forEach(cell => {
-          maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
-        });
-        
-        const maxHeight = Math.max(fixedHeight, scrollHeight, maxCellHeight);
-        if (maxHeight > 0) {
-          fixedRow.style.height = `${maxHeight}px`;
-          scrollRow.style.height = `${maxHeight}px`;
-        }
-      });
-    });
+    // Queue height sync — batched via single rAF to avoid layout thrashing
+    this._schedulePostPopulateSync();
     
     // Update tab indexes after population
     this._scheduleTabIndexUpdate();
@@ -3066,6 +3074,24 @@ class DivTable {
     this._tabIndexUpdateTimer = requestAnimationFrame(() => {
       this._tabIndexUpdateTimer = null;
       this.updateTabIndexes();
+    });
+  }
+
+  /**
+   * Batched post-populate sync for fixed-column layouts.
+   * After lazy cell population, column widths and row heights may have changed.
+   * This re-syncs everything in a single rAF pass to avoid multiple reflows.
+   */
+  _schedulePostPopulateSync() {
+    if (this._postPopulateSyncTimer) return;
+    this._postPopulateSyncTimer = requestAnimationFrame(() => {
+      this._postPopulateSyncTimer = null;
+
+      // Re-sync column widths first (may change row heights)
+      this.syncFixedColumnsColumnWidths();
+
+      // Then sync row heights between fixed and scroll sections
+      this.syncFixedColumnsRowHeights();
     });
   }
 
