@@ -24,6 +24,8 @@ A modern, flexible table widget built with CSS Grid and Flexbox instead of HTML 
 - **Grouping & Sorting**: Multi-level grouping with 4-state sorting (alphabetical asc/desc, count asc/desc)
 - **Selection Management**: Single and multi-row selection with checkbox support
 - **Filter Selected Rows**: Toggle to show only selected rows
+- **Focus Reconciliation**: Automatic focus tracking across data changes, filtering, and external pre-filtering
+- **Auto-Focus First Row**: Optionally auto-focus the first visible row when nothing is selected
 - **Loading States**: Configurable loading placeholders and progress indicators with visual feedback
 - **Keyboard Navigation**: Full keyboard accessibility with arrow key navigation
 - **Responsive Design**: Adaptive column sizing and mobile-friendly layout
@@ -309,6 +311,7 @@ const divTable = new DivTable(monaco, {
 | `fixedColumns` | Number | `0` | Number of columns to freeze on the left side when scrolling horizontally |
 | `showHeaderSummary` | Boolean | `false` | Show summary row at top with aggregates for all visible data |
 | `showGroupSummary` | Boolean | `false` | Show summary row after each group with group aggregates |
+| `autoFocusFirstRow` | Boolean | `false` | Automatically focus the first visible row when no row is focused (e.g. after data change or filter) |
 
 ### Virtual Scrolling Options
 
@@ -334,7 +337,7 @@ const divTable = new DivTable(monaco, {
 | Option | Type | Parameters | Description |
 |--------|------|------------|-------------|
 | `onSelectionChange` | Function | `(selectedRows)` | Called when row selection changes. Receives array of selected data objects |
-| `onRowFocus` | Function | `(rowData, groupInfo)` | Called when a row or group header receives focus |
+| `onRowFocus` | Function | `(rowData, groupInfo)` | Called when a row or group header receives focus. Also fires after `replaceData()`, `appendData()`, or `applyQuery()` with updated data if the focused row still exists, or `(undefined, undefined)` if the focused row was removed or hidden by a filter |
 | `onNextPage` | Function | `(page, pageSize)` | Called to load next page of data. Should return array of records or Promise |
 | `onPreviousPage` | Function | `(page, pageSize)` | Called to load previous page (optional) |
 | `onRefresh` | Function | `()` | Called when refresh button is clicked. Should reload data |
@@ -394,6 +397,10 @@ The widget provides full keyboard accessibility:
 - Group headers are always focusable and can be expanded/collapsed with arrow keys
 - Selection changes trigger the `onSelectionChange` callback
 - Focus changes trigger the `onRowFocus` callback
+- After `replaceData()`, `appendData()`, or `applyQuery()`, focus is reconciled:
+  - If the focused row still exists in the visible data, `onRowFocus` re-fires with the (possibly updated) row data
+  - If the focused row was removed or hidden by a filter, `onRowFocus(undefined, undefined)` fires
+  - With `autoFocusFirstRow: true`, the first visible row is auto-focused instead of clearing
 
 ## API Methods
 
@@ -408,6 +415,12 @@ divTable.addRecord({ id: 1, name: 'John Doe', email: 'john@example.com' });
 
 // Remove a record by ID
 const removedRecord = divTable.removeRecord(1);
+
+// Replace all data (triggers focus reconciliation)
+divTable.replaceData(newDataArray);
+
+// Append data (upsert — updates existing rows, adds new ones)
+divTable.appendData(additionalRows);
 
 // Refresh the table data (reloads from onNextPage if virtual scrolling)
 await divTable.refresh();
@@ -774,6 +787,30 @@ The widget uses CSS custom properties (variables) for easy theming. Override the
 | State | `--dt-error`, `--dt-success`, `--dt-warning`, `--dt-info` | Status indicator colors |
 | UI | `--dt-button-*`, `--dt-scrollbar-*` | Button and scrollbar styling |
 
+## Pre-Filtering Data Externally
+
+You can pre-filter data outside the widget before passing it to `replaceData()`. This is useful when you want to apply server-side or custom filters that are separate from the built-in query bar.
+
+The widget's `queryEngine` exposes `evaluateExpression(row, expression)` which lets you reuse the same query syntax:
+
+```javascript
+const fullData = [...originalData];
+
+// Pre-filter using the widget's query engine
+const expression = 'city = "New York" AND active = true';
+const filtered = fullData.filter(row =>
+  divTable.queryEngine.evaluateExpression(row, expression)
+);
+
+// Replace data — triggers focus reconciliation automatically
+divTable.replaceData(filtered);
+
+// To reset, pass the full dataset again
+divTable.replaceData([...fullData]);
+```
+
+This approach keeps a reference to the full dataset and filters it before calling `replaceData()`. The widget's built-in query bar still works independently on top of the pre-filtered data.
+
 ## Browser Support
 
 - Chrome/Edge: Latest 2 versions
@@ -803,6 +840,12 @@ limitations under the License.
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Changelog
+
+### Version 1.3.0 (2026-04-18)
+
+- **Focus reconciliation**: `onRowFocus` now fires automatically after `replaceData()`, `appendData()`, and `applyQuery()` — with updated row data if the focused row still exists, or `(undefined, undefined)` if it was removed or hidden by a filter
+- **`autoFocusFirstRow` option**: When enabled, the first visible row is automatically focused whenever no row is focused (e.g. after data replacement or filter change). Default: `false`
+- **External pre-filtering**: Data can be pre-filtered externally using `queryEngine.evaluateExpression()` before calling `replaceData()` (see Pre-Filtering section below)
 
 ### Version 1.2.1 (2026-02-05)
 

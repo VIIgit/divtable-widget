@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0] - 2026-04-18
+
+### Added
+
+- **Focus reconciliation after data changes**: `onRowFocus` now fires automatically after `replaceData()`, `appendData()`, and `applyQuery()`. If the focused row still exists in the visible (filtered) data, the callback re-fires with the current row data. If the focused row was removed or hidden by a filter, `onRowFocus(undefined, undefined)` fires to allow clearing detail panels.
+- **`autoFocusFirstRow` option** (default: `false`): When enabled, the first visible row is automatically focused whenever no row has focus — for example after initial data load, data replacement, or when a filter hides the previously focused row.
+- **External pre-filtering support**: The widget's `queryEngine.evaluateExpression(row, expression)` can be used to pre-filter data externally before calling `replaceData()`, allowing server-side or custom filters separate from the built-in query bar.
+
 ## [1.2.0] - 2026-02-01
 
 ### Fixed

@@ -27,6 +27,7 @@ class DivTable {
     this.multiSelect = options.multiSelect !== false;
     this.onSelectionChange = options.onSelectionChange || (() => {});
     this.onRowFocus = options.onRowFocus || (() => {});
+    this.autoFocusFirstRow = options.autoFocusFirstRow || false;
     
     // Group collapse option: controls whether groups start collapsed (default: true for backward compat)
     this.groupCollapsed = options.groupCollapsed !== false;
@@ -102,6 +103,10 @@ class DivTable {
     // Find primary key field first
     this.primaryKeyField = this.columns.find(col => col.primaryKey)?.field || 'id';
     
+    // Build lookup map for O(1) row data access
+    this._dataMap = new Map();
+    this._buildDataMap();
+    
     // Initialize QueryEngine like in smart-table with primary key field
     this.queryEngine = new QueryEngine(this.data, this.primaryKeyField);
     
@@ -124,6 +129,27 @@ class DivTable {
    * @param {string} html - String potentially containing HTML
    * @returns {string} Plain text without HTML tags
    */
+  // Grid size lookup table (replaces 7x duplicated switch blocks)
+  static GRID_SIZES = {
+    'fixed-narrow': '80px',
+    'fixed-medium': '120px',
+    'flexible-small': '1fr',
+    'flexible-medium': '2fr',
+    'flexible-large': '3fr'
+  };
+
+  _getGridSize(composite) {
+    const responsive = composite.columns[0].responsive || {};
+    return DivTable.GRID_SIZES[responsive.size] || '1fr';
+  }
+
+  _buildDataMap() {
+    this._dataMap.clear();
+    for (const item of this.data) {
+      this._dataMap.set(String(item[this.primaryKeyField]), item);
+    }
+  }
+
   stripHtmlTags(html) {
     if (!html) return '';
     // Replace <br> and <br/> with space, then strip all other HTML tags
@@ -1240,21 +1266,68 @@ class DivTable {
     }
   }
 
-  findRowData(rowId) {
-    // First try to find in the current filteredData
-    let result = this.filteredData.find(item => 
-      String(item[this.primaryKeyField]) === String(rowId)
-    );
-    
-    // If not found in filteredData, search in the original data
-    // This ensures we can always find the data even if there are timing issues
-    if (!result) {
-      result = this.data.find(item => 
-        String(item[this.primaryKeyField]) === String(rowId)
-      );
+  reconcileFocusAfterDataChange() {
+    if (!this.focusedRowId) {
+      // No row focused — auto-focus first visible row if enabled
+      if (this.autoFocusFirstRow && this.filteredData.length > 0) {
+        this._autoFocusFirst();
+      }
+      return;
     }
-    
-    return result;
+
+    // Check filteredData only — if a query/filter hides the row it should count as "gone"
+    const rowData = this.filteredData.find(item =>
+      String(item[this.primaryKeyField]) === String(this.focusedRowId)
+    );
+    if (rowData) {
+      // Row still visible — re-fire callback with (possibly updated) data
+      this._lastFocusCallback = { rowId: null, groupKey: null };
+      
+      // Re-apply visual focus in the DOM if the element exists
+      const row = this.bodyContainer?.querySelector(`[data-id="${this.focusedRowId}"]`);
+      if (row) {
+        row.classList.add('focused');
+      }
+      
+      if (typeof this.onRowFocus === 'function') {
+        this.onRowFocus(rowData, undefined);
+      }
+      this._lastFocusCallback = { rowId: this.focusedRowId, groupKey: null };
+    } else {
+      // Row is gone or hidden by filter — clear focus and notify
+      this.focusedRowId = null;
+      this._lastFocusCallback = { rowId: null, groupKey: null };
+      if (this.autoFocusFirstRow && this.filteredData.length > 0) {
+        // Auto-focus first visible row instead of clearing
+        this._autoFocusFirst();
+      } else if (typeof this.onRowFocus === 'function') {
+        this.onRowFocus(undefined, undefined);
+      }
+    }
+  }
+
+  _autoFocusFirst() {
+    const firstRow = this.filteredData[0];
+    const firstId = String(firstRow[this.primaryKeyField]);
+    this.focusedRowId = firstId;
+    this._lastFocusCallback = { rowId: firstId, groupKey: null };
+
+    const row = this.bodyContainer?.querySelector(`[data-id="${firstId}"]`);
+    if (row) {
+      row.classList.add('focused');
+    }
+
+    if (typeof this.onRowFocus === 'function') {
+      this.onRowFocus(firstRow, undefined);
+    }
+  }
+
+  findRowData(rowId) {
+    return this._dataMap.get(String(rowId)) || null;
+  }
+
+  _getSelectedRowData() {
+    return Array.from(this.selectedRows).map(id => this._dataMap.get(id)).filter(Boolean);
   }
 
   handleSelectionToggle(currentIndex) {
@@ -1302,7 +1375,7 @@ class DivTable {
     
     // Trigger selection change callback
     if (typeof this.onSelectionChange === 'function') {
-      this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+      this.onSelectionChange(this._getSelectedRowData());
     }
   }
 
@@ -1375,7 +1448,7 @@ class DivTable {
 
     this.updateCheckboxes();
     if (typeof this.onSelectionChange === 'function') {
-      this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+      this.onSelectionChange(this._getSelectedRowData());
     }
   }
 
@@ -1598,8 +1671,8 @@ class DivTable {
     this.updateSelectionStates();
     this.updateTabIndexes(); // Update tab navigation order
     
-    // Verify data consistency in development mode
-    if (typeof process === 'undefined' || process.env.NODE_ENV !== 'production') {
+    // Verify data consistency in development/test mode only (skip in browser production)
+    if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
       setTimeout(() => this.verifyDataConsistency(), 0);
     }
   }
@@ -1623,28 +1696,7 @@ class DivTable {
     
     // Add column templates for each composite group
     compositeColumns.forEach(composite => {
-      // For composite columns, use the responsive size of the first column
-      const firstCol = composite.columns[0];
-      const responsive = firstCol.responsive || {};
-      switch (responsive.size) {
-        case 'fixed-narrow':
-          gridTemplate += '80px ';
-          break;
-        case 'fixed-medium':
-          gridTemplate += '120px ';
-          break;
-        case 'flexible-small':
-          gridTemplate += '1fr ';
-          break;
-        case 'flexible-medium':
-          gridTemplate += '2fr ';
-          break;
-        case 'flexible-large':
-          gridTemplate += '3fr ';
-          break;
-        default:
-          gridTemplate += '1fr ';
-      }
+      gridTemplate += this._getGridSize(composite) + ' ';
     });
     
     this.headerContainer.style.gridTemplateColumns = gridTemplate.trim();
@@ -1915,6 +1967,7 @@ class DivTable {
   }
 
   getColumnGridSize(composite, isFixedContainer = false) {
+    if (!isFixedContainer) return this._getGridSize(composite);
     const firstCol = composite.columns[0];
     const responsive = firstCol.responsive || {};
     switch (responsive.size) {
@@ -1923,13 +1976,13 @@ class DivTable {
       case 'fixed-medium':
         return '120px';
       case 'flexible-small':
-        return isFixedContainer ? 'minmax(80px, 150px)' : '1fr';
+        return 'minmax(80px, 150px)';
       case 'flexible-medium':
-        return isFixedContainer ? 'minmax(100px, 200px)' : '2fr';
+        return 'minmax(100px, 200px)';
       case 'flexible-large':
-        return isFixedContainer ? 'minmax(120px, 280px)' : '3fr';
+        return 'minmax(120px, 280px)';
       default:
-        return isFixedContainer ? 'minmax(100px, 200px)' : '1fr';
+        return 'minmax(100px, 200px)';
     }
   }
 
@@ -2007,10 +2060,6 @@ class DivTable {
       // Right-aligned indicators wrapper
       const rightContent = document.createElement('div');
       rightContent.className = 'header-right-content';
-      rightContent.style.display = 'flex';
-      rightContent.style.alignItems = 'center';
-      rightContent.style.gap = '4px';
-      rightContent.style.marginLeft = 'auto';
       
       // Add groupable indicator if column is groupable
       if (col.groupable !== false && !col.hidden) {
@@ -2020,8 +2069,6 @@ class DivTable {
           groupIndicator.classList.add('grouped');
         }
         groupIndicator.textContent = this.groupByField === col.field ? '☴' : '☷';
-        groupIndicator.style.cursor = 'pointer';
-        groupIndicator.style.fontSize = '1em';
         const columnTitle = this.stripHtmlTags(col.label || col.field);
         groupIndicator.title = this.groupByField === col.field ? `Grouped by ${columnTitle} (click to ungroup)` : `Click to group by ${columnTitle}`;
         
@@ -2041,7 +2088,6 @@ class DivTable {
       // Add sort indicator placeholder
       const sortIndicator = document.createElement('span');
       sortIndicator.className = 'sort-indicator';
-      sortIndicator.style.marginLeft = '4px';
       
       if (this.sortColumn === col.field) {
         sortIndicator.classList.add('active');
@@ -2075,7 +2121,6 @@ class DivTable {
       if (col.subField) {
         const subSortIndicator = document.createElement('span');
         subSortIndicator.className = 'sub-sort-indicator';
-        subSortIndicator.style.marginLeft = '4px';
         
         if (this.sortColumn === col.subField) {
           subSortIndicator.classList.add('active');
@@ -2195,8 +2240,6 @@ class DivTable {
         groupIndicator.classList.add('grouped');
       }
       groupIndicator.textContent = this.groupByField === col.field ? '☴' : '☷';
-      groupIndicator.style.cursor = 'pointer';
-      groupIndicator.style.fontSize = '1em';
       const columnTitle = this.stripHtmlTags(col.label || col.field);
       groupIndicator.title = this.groupByField === col.field ? `Grouped by ${columnTitle} (click to ungroup)` : `Click to group by ${columnTitle}`;
       
@@ -2218,8 +2261,6 @@ class DivTable {
     // Add sort indicator
     const sortIndicator = document.createElement('span');
     sortIndicator.className = 'sort-indicator';
-    sortIndicator.style.fontSize = '12px';
-    sortIndicator.style.marginLeft = '4px';
     
     if (this.sortColumn === col.field) {
       sortIndicator.classList.add('active');
@@ -2357,8 +2398,6 @@ class DivTable {
           groupIndicator.classList.add('grouped');
         }
         groupIndicator.textContent = this.groupByField === col.field ? '☴' : '☷';
-        groupIndicator.style.cursor = 'pointer';
-        groupIndicator.style.fontSize = '1em';
         const columnTitle = this.stripHtmlTags(col.label || col.field);
         groupIndicator.title = this.groupByField === col.field ? `Grouped by ${columnTitle} (click to ungroup)` : `Click to group by ${columnTitle}`;
         
@@ -2377,7 +2416,6 @@ class DivTable {
       // Add sort indicator
       const sortIndicator = document.createElement('span');
       sortIndicator.className = 'sort-indicator';
-      sortIndicator.style.marginLeft = '4px';
       
       if (this.sortColumn === col.field) {
         sortIndicator.classList.add('active');
@@ -2421,6 +2459,10 @@ class DivTable {
     if (this.rowObserver) {
       this.rowObserver.disconnect();
     }
+    
+    // Invalidate per-render caches
+    this._cachedGridTemplate = null;
+    this._cachedCompositeColumns = null;
     
     // Handle fixed columns layout
     if (this.fixedColumns > 0) {
@@ -2559,12 +2601,17 @@ class DivTable {
 
   renderRegularRowsWithFixedColumns(dataToRender = this.filteredData) {
     const sortedData = this.sortData(dataToRender);
+    const fixedFragment = document.createDocumentFragment();
+    const scrollFragment = document.createDocumentFragment();
     
     sortedData.forEach(item => {
       const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
-      this.fixedBodyContainer.appendChild(fixedRow);
-      this.scrollBodyContainer.appendChild(scrollRow);
+      fixedFragment.appendChild(fixedRow);
+      scrollFragment.appendChild(scrollRow);
     });
+    
+    this.fixedBodyContainer.appendChild(fixedFragment);
+    this.scrollBodyContainer.appendChild(scrollFragment);
   }
 
   renderGroupedRowsWithFixedColumns(dataToRender = this.filteredData) {
@@ -2593,6 +2640,9 @@ class DivTable {
       });
     }
     
+    const fixedFragment = document.createDocumentFragment();
+    const scrollFragment = document.createDocumentFragment();
+    
     groups.forEach(group => {
       if (this.sortColumn !== this.groupByField) {
         group.items = this.sortData(group.items);
@@ -2600,25 +2650,21 @@ class DivTable {
       
       // Group header spans both sections
       const { fixedGroupHeader, scrollGroupHeader } = this.createGroupHeaderWithFixedColumns(group);
-      this.fixedBodyContainer.appendChild(fixedGroupHeader);
-      this.scrollBodyContainer.appendChild(scrollGroupHeader);
+      fixedFragment.appendChild(fixedGroupHeader);
+      scrollFragment.appendChild(scrollGroupHeader);
       
       // Group rows (if not collapsed)
       if (!this.collapsedGroups.has(group.key)) {
         group.items.forEach(item => {
           const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
-          this.fixedBodyContainer.appendChild(fixedRow);
-          this.scrollBodyContainer.appendChild(scrollRow);
+          fixedFragment.appendChild(fixedRow);
+          scrollFragment.appendChild(scrollRow);
         });
       }
-      
-      // Add group summary row after group (visible even when collapsed)
-      if (this.showGroupSummary && this.hasAggregateColumns()) {
-        const { fixedSummary, scrollSummary } = this.createGroupSummaryRowWithFixedColumns(group);
-        this.fixedBodyContainer.appendChild(fixedSummary);
-        this.scrollBodyContainer.appendChild(scrollSummary);
-      }
     });
+
+    this.fixedBodyContainer.appendChild(fixedFragment);
+    this.scrollBodyContainer.appendChild(scrollFragment);
   }
 
   /**
@@ -2725,11 +2771,14 @@ class DivTable {
 
   renderRegularRows(dataToRender = this.filteredData) {
     const sortedData = this.sortData(dataToRender);
+    const fragment = document.createDocumentFragment();
     
     sortedData.forEach(item => {
       const row = this.createRow(item);
-      this.bodyContainer.appendChild(row);
+      fragment.appendChild(row);
     });
+    
+    this.bodyContainer.appendChild(fragment);
   }
 
   renderGroupedRows(dataToRender = this.filteredData) {
@@ -2758,6 +2807,8 @@ class DivTable {
       });
     }
 
+    const fragment = document.createDocumentFragment();
+
     groups.forEach(group => {
       // Sort items within each group (unless sorting by grouped column, then no need to sort items)
       if (this.sortColumn !== this.groupByField) {
@@ -2766,22 +2817,18 @@ class DivTable {
       
       // Group header
       const groupHeader = this.createGroupHeader(group);
-      this.bodyContainer.appendChild(groupHeader);
+      fragment.appendChild(groupHeader);
       
       // Group rows (if not collapsed)
       if (!this.collapsedGroups.has(group.key)) {
         group.items.forEach(item => {
           const row = this.createRow(item);
-          this.bodyContainer.appendChild(row);
+          fragment.appendChild(row);
         });
       }
-      
-      // Add group summary row after group (visible even when collapsed)
-      if (this.showGroupSummary && this.hasAggregateColumns()) {
-        const groupSummary = this.createGroupSummaryRow(group);
-        this.bodyContainer.appendChild(groupSummary);
-      }
     });
+
+    this.bodyContainer.appendChild(fragment);
   }
 
   /**
@@ -2793,7 +2840,7 @@ class DivTable {
     // Skip if already populated
     if (row.dataset.populated === 'true') return;
     
-    const compositeColumns = this.getCompositeColumns();
+    const compositeColumns = this._cachedCompositeColumns || this.getCompositeColumns();
     const rowId = String(item[this.primaryKeyField]);
 
     // Checkbox column
@@ -2875,8 +2922,8 @@ class DivTable {
     // Mark as populated
     row.dataset.populated = 'true';
     
-    // Update tab indexes after population
-    this.updateTabIndexes();
+    // Debounce tab index update to avoid full DOM traversal per row
+    this._scheduleTabIndexUpdate();
   }
 
   /**
@@ -3011,7 +3058,31 @@ class DivTable {
     });
     
     // Update tab indexes after population
-    this.updateTabIndexes();
+    this._scheduleTabIndexUpdate();
+  }
+
+  _scheduleTabIndexUpdate() {
+    if (this._tabIndexUpdateTimer) return;
+    this._tabIndexUpdateTimer = requestAnimationFrame(() => {
+      this._tabIndexUpdateTimer = null;
+      this.updateTabIndexes();
+    });
+  }
+
+  _cacheGridTemplate() {
+    const compositeColumns = this.getCompositeColumns();
+    this._cachedCompositeColumns = compositeColumns;
+    
+    let gridTemplate = '';
+    if (this.showCheckboxes) {
+      gridTemplate = '40px ';
+    }
+    
+    compositeColumns.forEach(composite => {
+      gridTemplate += this._getGridSize(composite) + ' ';
+    });
+    
+    this._cachedGridTemplate = gridTemplate.trim();
   }
 
   createRow(item) {
@@ -3020,40 +3091,13 @@ class DivTable {
     row.dataset.id = item[this.primaryKeyField];
     // Don't set tabindex here - will be managed by updateTabIndexes() based on checkbox presence
     
-    const compositeColumns = this.getCompositeColumns();
-    
-    // Build grid template matching the header
-    let gridTemplate = '';
-    if (this.showCheckboxes) {
-      gridTemplate = '40px '; // Checkbox column
+    // Use cached grid template and composite columns (set per render cycle)
+    if (!this._cachedGridTemplate) {
+      this._cacheGridTemplate();
     }
+    const compositeColumns = this._cachedCompositeColumns;
     
-    // Add column templates for each composite group
-    compositeColumns.forEach(composite => {
-      const firstCol = composite.columns[0];
-      const responsive = firstCol.responsive || {};
-      switch (responsive.size) {
-        case 'fixed-narrow':
-          gridTemplate += '80px ';
-          break;
-        case 'fixed-medium':
-          gridTemplate += '120px ';
-          break;
-        case 'flexible-small':
-          gridTemplate += '1fr ';
-          break;
-        case 'flexible-medium':
-          gridTemplate += '2fr ';
-          break;
-        case 'flexible-large':
-          gridTemplate += '3fr ';
-          break;
-        default:
-          gridTemplate += '1fr ';
-      }
-    });
-    
-    row.style.gridTemplateColumns = gridTemplate.trim();
+    row.style.gridTemplateColumns = this._cachedGridTemplate;
 
     // Selection state
     const rowId = String(item[this.primaryKeyField]);
@@ -3669,7 +3713,7 @@ class DivTable {
           this.updateInfoSection();
           
           if (typeof this.onSelectionChange === 'function') {
-            this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+            this.onSelectionChange(this._getSelectedRowData());
           }
           return;
         }
@@ -3678,7 +3722,7 @@ class DivTable {
         this.updateInfoSection();
         
         if (typeof this.onSelectionChange === 'function') {
-          this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+          this.onSelectionChange(this._getSelectedRowData());
         }
       });
       
@@ -3690,10 +3734,38 @@ class DivTable {
       fixedGroupHeader.appendChild(checkboxCell);
     }
     
-    // Group label cell spans remaining fixed columns
+    // Determine which composites have aggregates (for inline summary)
+    const hasAggregates = this.showGroupSummary && this.hasAggregateColumns();
+    
+    // Find the first fixed composite index that has an aggregate
+    let firstFixedAggregateIndex = fixedColumns.length;
+    if (hasAggregates) {
+      for (let i = 0; i < fixedColumns.length; i++) {
+        if (fixedColumns[i].columns.some(col => col.aggregate)) {
+          firstFixedAggregateIndex = i;
+          break;
+        }
+      }
+    }
+    
+    // Get group data for aggregates, considering selection
+    let groupData = group.items;
+    if (hasAggregates && this.selectedRows.size > 0) {
+      groupData = group.items.filter(item => {
+        const itemId = String(item[this.primaryKeyField]);
+        return this.selectedRows.has(itemId);
+      });
+    }
+    
+    const fixedColOffset = this.showCheckboxes ? 2 : 1;
+    const fixedLabelEndCol = hasAggregates && firstFixedAggregateIndex < fixedColumns.length
+      ? (fixedColOffset + firstFixedAggregateIndex)
+      : -1;
+    
+    // Group label cell spans non-aggregate fixed columns
     const fixedLabelCell = document.createElement('div');
     fixedLabelCell.className = 'div-table-cell';
-    fixedLabelCell.style.gridColumn = this.showCheckboxes ? '2 / -1' : '1 / -1';
+    fixedLabelCell.style.gridColumn = `${fixedColOffset} / ${fixedLabelEndCol}`;
     fixedLabelCell.style.display = 'flex';
     fixedLabelCell.style.alignItems = 'center';
     fixedLabelCell.style.gap = '8px';
@@ -3754,11 +3826,48 @@ class DivTable {
     
     fixedGroupHeader.appendChild(fixedLabelCell);
     
-    // Scrollable section gets an empty spanning cell
-    const scrollLabelCell = document.createElement('div');
-    scrollLabelCell.className = 'div-table-cell';
-    scrollLabelCell.style.gridColumn = '1 / -1';
-    scrollGroupHeader.appendChild(scrollLabelCell);
+    // Add inline aggregate cells to fixed section (if any fixed columns have aggregates)
+    if (hasAggregates) {
+      for (let i = firstFixedAggregateIndex; i < fixedColumns.length; i++) {
+        const composite = fixedColumns[i];
+        const aggCell = this.createSummaryCell(composite, groupData);
+        aggCell.classList.add('group-summary-cell');
+        fixedGroupHeader.appendChild(aggCell);
+      }
+    }
+    
+    // Scrollable section: aggregate cells per column, or empty spanning cell
+    if (hasAggregates) {
+      // Find the first scroll composite index that has an aggregate
+      let firstScrollAggregateIndex = scrollColumns.length;
+      for (let i = 0; i < scrollColumns.length; i++) {
+        if (scrollColumns[i].columns.some(col => col.aggregate)) {
+          firstScrollAggregateIndex = i;
+          break;
+        }
+      }
+      
+      if (firstScrollAggregateIndex > 0) {
+        // Empty cell spanning non-aggregate scroll columns
+        const emptyCell = document.createElement('div');
+        emptyCell.className = 'div-table-cell';
+        emptyCell.style.gridColumn = `1 / ${1 + firstScrollAggregateIndex}`;
+        scrollGroupHeader.appendChild(emptyCell);
+      }
+      
+      for (let i = firstScrollAggregateIndex; i < scrollColumns.length; i++) {
+        const composite = scrollColumns[i];
+        const aggCell = this.createSummaryCell(composite, groupData);
+        aggCell.classList.add('group-summary-cell');
+        scrollGroupHeader.appendChild(aggCell);
+      }
+    } else {
+      // Scrollable section gets an empty spanning cell
+      const scrollLabelCell = document.createElement('div');
+      scrollLabelCell.className = 'div-table-cell';
+      scrollLabelCell.style.gridColumn = '1 / -1';
+      scrollGroupHeader.appendChild(scrollLabelCell);
+    }
     
     // Group toggle click handler
     const handleToggleClick = (e) => {
@@ -3801,36 +3910,17 @@ class DivTable {
     groupRow.className = 'div-table-row group-header';
     groupRow.dataset.groupKey = group.key; // Store group key for identification
     
-    const orderedColumns = this.getOrderedColumns();
+    const compositeColumns = this.getCompositeColumns();
     
-    // Use the same grid template as header
+    // Use the same grid template as data rows (composite-based)
     let gridTemplate = '';
     if (this.showCheckboxes) {
       gridTemplate = '40px '; // Checkbox column
     }
     
-    // Add column templates
-    orderedColumns.forEach(col => {
-      const responsive = col.responsive || {};
-      switch (responsive.size) {
-        case 'fixed-narrow':
-          gridTemplate += '80px ';
-          break;
-        case 'fixed-medium':
-          gridTemplate += '120px ';
-          break;
-        case 'flexible-small':
-          gridTemplate += '1fr ';
-          break;
-        case 'flexible-medium':
-          gridTemplate += '2fr ';
-          break;
-        case 'flexible-large':
-          gridTemplate += '3fr ';
-          break;
-        default:
-          gridTemplate += '1fr ';
-      }
+    // Add column templates for each composite group
+    compositeColumns.forEach(composite => {
+      gridTemplate += this._getGridSize(composite) + ' ';
     });
     
     groupRow.style.gridTemplateColumns = gridTemplate.trim();
@@ -3892,7 +3982,7 @@ class DivTable {
           
           // Trigger selection change callback
           if (typeof this.onSelectionChange === 'function') {
-            this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+            this.onSelectionChange(this._getSelectedRowData());
           }
           return;
         }
@@ -3903,7 +3993,7 @@ class DivTable {
         
         // Trigger selection change callback
         if (typeof this.onSelectionChange === 'function') {
-          this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+          this.onSelectionChange(this._getSelectedRowData());
         }
       });
       
@@ -3916,10 +4006,31 @@ class DivTable {
       groupRow.appendChild(checkboxCell);
     }
 
-    // Group label cell (spans remaining columns)
+    // Determine which composite columns have aggregates (for inline summary)
+    const hasAggregates = this.showGroupSummary && this.hasAggregateColumns();
+    
+    // Find the first composite index that has an aggregate
+    let firstAggregateIndex = compositeColumns.length;
+    if (hasAggregates) {
+      for (let i = 0; i < compositeColumns.length; i++) {
+        if (compositeColumns[i].columns.some(col => col.aggregate)) {
+          firstAggregateIndex = i;
+          break;
+        }
+      }
+    }
+    
+    // Grid column positions: checkbox is col 1 (if present), composites start at col 2 (or 1)
+    const colOffset = this.showCheckboxes ? 2 : 1;
+    
+    // Group label cell — spans from after checkbox to (but not including) the first aggregate column
+    const labelEndCol = hasAggregates && firstAggregateIndex < compositeColumns.length
+      ? (colOffset + firstAggregateIndex)
+      : -1; // span to end if no aggregates
+    
     const cell = document.createElement('div');
     cell.className = 'div-table-cell';
-    cell.style.gridColumn = this.showCheckboxes ? '2 / -1' : '1 / -1'; // Span from after checkbox to end
+    cell.style.gridColumn = `${colOffset} / ${labelEndCol}`;
     cell.style.display = 'flex';
     cell.style.alignItems = 'center';
     cell.style.gap = '8px';
@@ -3983,6 +4094,60 @@ class DivTable {
     }
     
     groupRow.appendChild(cell);
+
+    // Add inline aggregate cells for group summary (if enabled)
+    if (hasAggregates) {
+      // Get group data, considering selection
+      let groupData = group.items;
+      if (this.selectedRows.size > 0) {
+        groupData = group.items.filter(item => {
+          const itemId = String(item[this.primaryKeyField]);
+          return this.selectedRows.has(itemId);
+        });
+      }
+      
+      for (let i = firstAggregateIndex; i < compositeColumns.length; i++) {
+        const composite = compositeColumns[i];
+        const aggCell = document.createElement('div');
+        aggCell.className = 'div-table-cell summary-cell group-summary-cell';
+        
+        if (composite.compositeName) {
+          aggCell.classList.add('composite-cell');
+          composite.columns.forEach(col => {
+            const subCell = document.createElement('div');
+            subCell.className = 'composite-sub-cell';
+            if (col.aggregate) {
+              const aggregateValue = this.calculateAggregate(col, groupData);
+              const formattedValue = this.formatAggregateValue(aggregateValue, col);
+              subCell.innerHTML = formattedValue;
+              subCell.classList.add('aggregate-value');
+              if (col.align) {
+                subCell.style.textAlign = col.align;
+              }
+            }
+            aggCell.appendChild(subCell);
+          });
+        } else {
+          const col = composite.columns[0];
+          if (col.align) {
+            aggCell.style.textAlign = col.align;
+            aggCell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
+                                           col.align === 'center' ? 'center' : 'flex-start';
+          }
+          if (col.aggregate) {
+            const aggregateValue = this.calculateAggregate(col, groupData);
+            const formattedValue = this.formatAggregateValue(aggregateValue, col);
+            const contentSpan = document.createElement('span');
+            contentSpan.className = 'cell-content';
+            contentSpan.innerHTML = formattedValue;
+            aggCell.appendChild(contentSpan);
+            aggCell.classList.add('aggregate-value');
+          }
+        }
+        
+        groupRow.appendChild(aggCell);
+      }
+    }
 
     // Group toggle click handler - only handles expand/collapse
     toggleBtn.addEventListener('click', (e) => {
@@ -4116,7 +4281,7 @@ class DivTable {
     this.updateSelectionStates();
     this.updateInfoSection();
     if (typeof this.onSelectionChange === 'function') {
-      this.onSelectionChange(Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean));
+      this.onSelectionChange(this._getSelectedRowData());
     }
   }
 
@@ -4676,13 +4841,15 @@ class DivTable {
       try {
         // Use QueryEngine like in smart-table for proper query parsing
         const filteredIds = this.queryEngine.filterObjects(query);
-        this.filteredData = this.data.filter(obj => filteredIds.includes(obj[this.primaryKeyField]));
+        const filteredIdSet = new Set(filteredIds.map(String));
+        this.filteredData = this.data.filter(obj => filteredIdSet.has(String(obj[this.primaryKeyField])));
       } catch (error) {
         this.filteredData = [...this.data];
       }
     }
     
     this.render();
+    this.reconcileFocusAfterDataChange();
   }
 
   sort(field, direction) {
@@ -4849,7 +5016,7 @@ class DivTable {
   }
 
   getSelectedRows() {
-    return Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean);
+    return this._getSelectedRowData();
   }
 
   /**
@@ -4901,6 +5068,7 @@ class DivTable {
         // Reset to loading state
         this.isLoadingState = true;
         this.data = [];
+        this._dataMap.clear();
         this.filteredData = [];
 
         // Reset pagination state
@@ -5080,15 +5248,7 @@ class DivTable {
       }
     }, 10);
 
-    // Set up proper query change handling
-    if (this.queryEditor.model) {
-      this.queryEditor.model.onDidChangeContent(() => {
-        const query = this.queryEditor.model.getValue();
-        this.handleQueryChange(query);
-      });
-    }
-
-    // Set up additional query listeners with debouncing
+    // Set up debounced query change handling (single listener to avoid duplicate filter+render)
     this._setupQueryListeners();
   }
 
@@ -5298,25 +5458,7 @@ class DivTable {
       }
       
       const responsive = col.responsive || {};
-      switch (responsive.size) {
-        case 'fixed-narrow':
-          gridTemplate += '80px ';
-          break;
-        case 'fixed-medium':
-          gridTemplate += '120px ';
-          break;
-        case 'flexible-small':
-          gridTemplate += '1fr ';
-          break;
-        case 'flexible-medium':
-          gridTemplate += '2fr ';
-          break;
-        case 'flexible-large':
-          gridTemplate += '3fr ';
-          break;
-        default:
-          gridTemplate += '1fr ';
-      }
+      gridTemplate += (DivTable.GRID_SIZES[responsive.size] || '1fr') + ' ';
     });
     
     row.style.gridTemplateColumns = gridTemplate.trim();
@@ -5437,6 +5579,7 @@ class DivTable {
     this.isLoading = false;
     this.hasMoreData = true;
     this.data = this.data.slice(0, this.pageSize); // Keep only first page
+    this._buildDataMap();
     this.filteredData = [...this.data];
     this.hideErrorIndicator();
     this.render();
@@ -5487,6 +5630,7 @@ class DivTable {
       
       // Update the query engine with new/updated data
       this.queryEngine.setObjects(this.data);
+      this._buildDataMap();
       
       // Update query editor if field values changed (for completion suggestions)
       this.updateQueryEditorIfNeeded();
@@ -5508,6 +5652,9 @@ class DivTable {
         // Still need to render the data, just skip the info section update
         this.render();
       }
+      
+      // Reconcile row focus: re-focus if row was updated, or keep as-is
+      this.reconcileFocusAfterDataChange();
     }
     
     return { 
@@ -5554,6 +5701,7 @@ class DivTable {
     }
 
     this.data = validRecords;
+    this._buildDataMap();
     this.isLoadingState = false;
     this.clearRefreshButtonLoadingState();
     
@@ -5589,6 +5737,10 @@ class DivTable {
     this.updateInfoSection();
     this.render();
     
+    // Reconcile row focus: if a row was focused before replaceData,
+    // re-focus it if it still exists, or clear focus if it's gone
+    this.reconcileFocusAfterDataChange();
+    
     return { 
       success: true, 
       totalProvided: newData.length,
@@ -5602,6 +5754,7 @@ class DivTable {
   resetToLoading() {
     this.isLoadingState = true;
     this.data = [];
+    this._dataMap.clear();
     this.filteredData = [];
     this.selectedRows.clear();
     this.currentQuery = '';
@@ -5763,16 +5916,7 @@ class DivTable {
     }
     
     compositeColumns.forEach(composite => {
-      const firstCol = composite.columns[0];
-      const responsive = firstCol.responsive || {};
-      switch (responsive.size) {
-        case 'fixed-narrow': gridTemplate += '80px '; break;
-        case 'fixed-medium': gridTemplate += '120px '; break;
-        case 'flexible-small': gridTemplate += '1fr '; break;
-        case 'flexible-medium': gridTemplate += '2fr '; break;
-        case 'flexible-large': gridTemplate += '3fr '; break;
-        default: gridTemplate += '1fr ';
-      }
+      gridTemplate += this._getGridSize(composite) + ' ';
     });
     
     summaryRow.style.gridTemplateColumns = gridTemplate.trim();
@@ -5868,16 +6012,7 @@ class DivTable {
     }
     
     compositeColumns.forEach(composite => {
-      const firstCol = composite.columns[0];
-      const responsive = firstCol.responsive || {};
-      switch (responsive.size) {
-        case 'fixed-narrow': gridTemplate += '80px '; break;
-        case 'fixed-medium': gridTemplate += '120px '; break;
-        case 'flexible-small': gridTemplate += '1fr '; break;
-        case 'flexible-medium': gridTemplate += '2fr '; break;
-        case 'flexible-large': gridTemplate += '3fr '; break;
-        default: gridTemplate += '1fr ';
-      }
+      gridTemplate += this._getGridSize(composite) + ' ';
     });
     
     summaryRow.style.gridTemplateColumns = gridTemplate.trim();
@@ -6196,10 +6331,10 @@ class DivTable {
       
       const groupSummaries = this.fixedColumns > 0
         ? [
-            this.fixedBodyContainer?.querySelector(`.group-summary[data-group-key="${group.key}"]`),
-            this.scrollBodyContainer?.querySelector(`.group-summary[data-group-key="${group.key}"]`)
+            this.fixedBodyContainer?.querySelector(`.group-header[data-group-key="${group.key}"]`),
+            this.scrollBodyContainer?.querySelector(`.group-header[data-group-key="${group.key}"]`)
           ].filter(Boolean)
-        : [this.bodyContainer?.querySelector(`.group-summary[data-group-key="${group.key}"]`)].filter(Boolean);
+        : [this.bodyContainer?.querySelector(`.group-header[data-group-key="${group.key}"]`)].filter(Boolean);
       
       groupSummaries.forEach(summaryRow => {
         const aggregateCells = summaryRow.querySelectorAll('.aggregate-value');
@@ -6238,10 +6373,18 @@ class QueryEngine {
       return this.searchObjects(query);
     }
 
+    // Compile the query once, then evaluate against every row
+    let compiledFilter;
+    try {
+      compiledFilter = this.compileExpression(query);
+    } catch (error) {
+      throw new Error(`Query error: ${error.message}`);
+    }
+
     const results = [];
     for (const obj of this.objects) {
       try {
-        if (this.evaluateExpression(obj, query)) {
+        if (compiledFilter(obj)) {
           results.push(obj[this.primaryKeyField]);
         }
       } catch (error) {
@@ -6265,6 +6408,70 @@ class QueryEngine {
       if (allTermsFound) results.push(obj[this.primaryKeyField]);
     }
     return results;
+  }
+
+  /**
+   * Compile a query expression into a reusable filter function.
+   * Parses the query once and returns (obj) => boolean, avoiding per-row regex parsing.
+   */
+  compileExpression(expression) {
+    if (!expression.trim()) return () => true;
+
+    expression = expression.replace(/\s+/g, ' ').trim();
+
+    // Resolve parenthesized groups from innermost outward into compiled sub-filters
+    // We'll parse the full expression into a tree of compiled groups
+    return this._compileExpressionTree(expression);
+  }
+
+  _compileExpressionTree(expression) {
+    // Find and compile innermost parenthesized groups first
+    while (/\(([^()]+)\)/.test(expression)) {
+      // Replace each innermost group with a placeholder token
+      const compiledSubs = [];
+      expression = expression.replace(/\(([^()]+)\)/g, (_, innerExpr) => {
+        const idx = compiledSubs.length;
+        compiledSubs.push(this._compileGroup(innerExpr));
+        return `__SUB_${idx}__`;
+      });
+      // Wrap the current state so we can reference the compiled subs in the final group
+      const outerSubs = compiledSubs;
+      const currentExpr = expression;
+      if (!/\(([^()]+)\)/.test(expression)) {
+        // No more parentheses, compile the remaining expression with sub-references
+        return this._compileGroup(currentExpr, outerSubs);
+      }
+    }
+
+    return this._compileGroup(expression);
+  }
+
+  _compileGroup(group, compiledSubs) {
+    const orConditions = group.split(/\s+OR\s+/);
+
+    const compiledOr = orConditions.map(conditionGroup => {
+      const andConditions = conditionGroup.split(/\s+AND\s+/);
+
+      const compiledAnd = andConditions.map(condition => {
+        const cond = condition.trim();
+        const condLower = cond.toLowerCase();
+        if (condLower === 'false') return () => false;
+        if (condLower === 'true') return () => true;
+
+        // Check for sub-expression placeholder
+        const subMatch = cond.match(/^__SUB_(\d+)__$/);
+        if (subMatch && compiledSubs) {
+          return compiledSubs[parseInt(subMatch[1], 10)];
+        }
+
+        const parsed = this.parseCondition(cond);
+        return (obj) => this.applyCondition(obj, parsed);
+      });
+
+      return (obj) => compiledAnd.every(fn => fn(obj));
+    });
+
+    return (obj) => compiledOr.some(fn => fn(obj));
   }
 
   evaluateExpression(obj, expression) {

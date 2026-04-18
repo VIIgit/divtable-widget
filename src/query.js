@@ -1727,7 +1727,8 @@ function createQueryEditor(monaco, container, { fieldNames = {}, initialValue = 
     clearButton.style.cssText = `
       position: absolute;
       right: 5px;
-      top: -12px;
+      top: 50%;
+      transform: translateY(-50%);
       width: 20px;
       height: 20px;
       border: 1px solid #d1d5db;

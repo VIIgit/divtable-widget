@@ -729,7 +729,7 @@ describe('DivTable', () => {
       expect(summaryRow).toBeNull();
     });
 
-    it('should render group summary rows when grouped', () => {
+    it('should render group summary in group headers when grouped', () => {
       const options = {
         tableWidgetElement: container,
         columns: aggregateColumns,
@@ -744,9 +744,12 @@ describe('DivTable', () => {
       divTable.collapsedGroups.clear();
       divTable.render();
 
-      const groupSummaries = container.querySelectorAll('.group-summary');
-      // Should have 3 group summaries (NYC, LA, Chicago)
-      expect(groupSummaries.length).toBe(3);
+      const groupHeaders = container.querySelectorAll('.group-header');
+      // Should have 3 group headers (NYC, LA, Chicago) with inline summary cells
+      expect(groupHeaders.length).toBe(3);
+      groupHeaders.forEach(header => {
+        expect(header.querySelectorAll('.group-summary-cell').length).toBeGreaterThan(0);
+      });
     });
 
     it('should format aggregate values with custom render function', () => {
@@ -793,6 +796,230 @@ describe('DivTable', () => {
       const sum = divTable.calculateAggregate(salaryColumn, aggregationData);
 
       expect(sum).toBe(110000); // Only selected rows
+    });
+  });
+
+  describe('replaceData focus reconciliation', () => {
+    it('should fire onRowFocus(undefined) when focused row is removed by replaceData', () => {
+      const focusCalls = [];
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      // Simulate focusing row with id '1'
+      divTable.focusedRowId = '1';
+      divTable._lastFocusCallback = { rowId: '1', groupKey: null };
+
+      focusCalls.length = 0;
+
+      // Replace data WITHOUT the focused row
+      divTable.replaceData([
+        { id: 20, name: 'New Person', age: 40, status: 'active' }
+      ]);
+
+      // Should have fired onRowFocus with undefined to clear the details panel
+      const clearCall = focusCalls.find(c => c.row === undefined);
+      expect(clearCall).toBeDefined();
+      expect(divTable.focusedRowId).toBeNull();
+    });
+
+    it('should re-fire onRowFocus with updated data when focused row survives replaceData', () => {
+      const focusCalls = [];
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      // Simulate focusing row with id '1'
+      divTable.focusedRowId = '1';
+      divTable._lastFocusCallback = { rowId: '1', groupKey: null };
+
+      focusCalls.length = 0;
+
+      // Replace data WITH the focused row (updated name)
+      divTable.replaceData([
+        { id: 1, name: 'John Updated', age: 31, status: 'active' }
+      ]);
+
+      // Should have re-fired onRowFocus with the updated row data
+      const refocusCall = focusCalls.find(c => c.row && c.row.name === 'John Updated');
+      expect(refocusCall).toBeDefined();
+      expect(divTable.focusedRowId).toBe('1');
+    });
+
+    it('should re-fire onRowFocus when focused row still exists after appendData', () => {
+      const focusCalls = [];
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      // Focus row with id '1'
+      divTable.focusedRowId = '1';
+      divTable._lastFocusCallback = { rowId: '1', groupKey: null };
+
+      focusCalls.length = 0;
+
+      divTable.appendData([
+        { id: 20, name: 'Extra', age: 50, status: 'active' }
+      ]);
+
+      // Row 1 still exists, so onRowFocus should re-fire with that row
+      const refocusCall = focusCalls.find(c => c.row && c.row.id === 1);
+      expect(refocusCall).toBeDefined();
+    });
+
+    it('should fire onRowFocus(undefined) when query filter hides the focused row', () => {
+      const focusCalls = [];
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      // Focus row id '1' (John Doe, age 30, status active)
+      divTable.focusedRowId = '1';
+      divTable._lastFocusCallback = { rowId: '1', groupKey: null };
+
+      focusCalls.length = 0;
+
+      // Apply a filter that excludes the focused row
+      divTable.applyQuery('status = "inactive"');
+
+      // Focused row is hidden by filter — should clear focus
+      const clearCall = focusCalls.find(c => c.row === undefined);
+      expect(clearCall).toBeDefined();
+      expect(divTable.focusedRowId).toBeNull();
+    });
+
+    it('should re-fire onRowFocus when query filter still includes the focused row', () => {
+      const focusCalls = [];
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      // Focus row id '1' (John Doe, age 30, status active)
+      divTable.focusedRowId = '1';
+      divTable._lastFocusCallback = { rowId: '1', groupKey: null };
+
+      focusCalls.length = 0;
+
+      // Apply a filter that still includes the focused row
+      divTable.applyQuery('status = "active"');
+
+      // Focused row is still visible — should re-fire with row data
+      const refocusCall = focusCalls.find(c => c.row && c.row.id === 1);
+      expect(refocusCall).toBeDefined();
+      expect(divTable.focusedRowId).toBe('1');
+    });
+  });
+
+  describe('autoFocusFirstRow', () => {
+    it('should not auto-focus by default', () => {
+      const focusCalls = [];
+      const divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      });
+
+      focusCalls.length = 0;
+
+      divTable.replaceData([...testData]);
+
+      // No auto-focus — focusedRowId should remain null
+      expect(divTable.focusedRowId).toBeNull();
+      const focusCall = focusCalls.find(c => c.row && c.row.id === 1);
+      expect(focusCall).toBeUndefined();
+    });
+
+    it('should auto-focus first row on replaceData when enabled and nothing focused', () => {
+      const focusCalls = [];
+      const divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        autoFocusFirstRow: true,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      });
+
+      focusCalls.length = 0;
+
+      divTable.replaceData([...testData]);
+
+      // Should auto-focus the first row
+      expect(divTable.focusedRowId).toBe('1');
+      const focusCall = focusCalls.find(c => c.row && c.row.id === 1);
+      expect(focusCall).toBeDefined();
+    });
+
+    it('should auto-focus first row when filter hides the focused row', () => {
+      const focusCalls = [];
+      const divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        autoFocusFirstRow: true,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      });
+
+      // Focus row id '1' (status=active)
+      divTable.focusedRowId = '1';
+      divTable._lastFocusCallback = { rowId: '1', groupKey: null };
+      focusCalls.length = 0;
+
+      // Filter excludes row 1 — only inactive rows remain (row 2: Jane Smith)
+      divTable.applyQuery('status = "inactive"');
+
+      // Should auto-focus first visible row instead of clearing
+      expect(divTable.focusedRowId).toBe('2');
+      const focusCall = focusCalls.find(c => c.row && c.row.id === 2);
+      expect(focusCall).toBeDefined();
+    });
+
+    it('should fire onRowFocus(undefined) when filter hides focused row and no data remains', () => {
+      const focusCalls = [];
+      const divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        autoFocusFirstRow: true,
+        onRowFocus: (row, group) => focusCalls.push({ row, group })
+      });
+
+      divTable.focusedRowId = '1';
+      divTable._lastFocusCallback = { rowId: '1', groupKey: null };
+      focusCalls.length = 0;
+
+      // Replace with empty data
+      divTable.replaceData([]);
+
+      // No data to auto-focus — should clear
+      expect(divTable.focusedRowId).toBeNull();
+      const clearCall = focusCalls.find(c => c.row === undefined);
+      expect(clearCall).toBeDefined();
     });
   });
 });

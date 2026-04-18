@@ -10,6 +10,37 @@
   <!-- <link rel="stylesheet" href="../src/div-table-theme-dark.css"> -->
   <!-- Demo Page Layout Styles -->
   <link rel="stylesheet" href="demo.css">
+  <style>
+    .system-filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      margin-bottom: 4px;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .system-filter-bar label { font-weight: 600; white-space: nowrap; }
+    .system-filter-bar input {
+      flex: 1;
+      padding: 4px 8px;
+      border: 1px solid #ced4da;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    .system-filter-bar button {
+      padding: 4px 12px;
+      border: 1px solid #ced4da;
+      border-radius: 3px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .system-filter-bar button:hover { background: #e9ecef; }
+  </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
 </head>
 
@@ -19,6 +50,12 @@
     <p>A modern table widget built with CSS Grid and Flexbox - no HTML tables!</p>
 
     <h2>Table with Checkboxes</h2>
+    <div class="system-filter-bar" id="filterbar1">
+      <label>Pre-filter:</label>
+      <input id="prefilter1" type="text" placeholder='e.g. active = true AND age > 25' spellcheck="false">
+      <button id="prefilter1-apply">Apply</button>
+      <button id="prefilter1-clear">Clear</button>
+    </div>
     <div class="table-layout">
       <div class="table-section">
         <div id="divtable1" class="div-table-widget">
@@ -35,6 +72,12 @@
     </div>
 
     <h2>Table without Checkboxes</h2>
+    <div class="system-filter-bar" id="filterbar2">
+      <label>Pre-filter:</label>
+      <input id="prefilter2" type="text" placeholder='e.g. city = Chicago' spellcheck="false">
+      <button id="prefilter2-apply">Apply</button>
+      <button id="prefilter2-clear">Clear</button>
+    </div>
     <div class="table-layout">
       <div class="table-section">
         <div id="divtable2" class="div-table-widget">
@@ -111,7 +154,7 @@
     }
 
     const data = [
-      { id: 1, name: 'John Doe', age: 30, city: 'New York', active: true, technical: 1001, salary: 75000 },
+      { id: 1, name: 'John Doe', age: 30, city: 'New York', active: true, technical: 1001, salary: 75000, tags: ['a', 'b'] },
       { id: 2, name: 'Jane Smith', age: 25, city: 'Los Angeles', active: false, technical: 1002, salary: 65000 },
       { id: 3, name: 'Bob Johnson', age: 35, city: 'Chicago', active: true, technical: 1003, salary: 85000 },
       { id: 4, name: 'Alice Brown', age: 28, city: 'New York', active: false, technical: 1004, salary: 70000 },
@@ -141,8 +184,15 @@
         groupable: false
       },
       {
+        field: 'tags',
+        label: 'TAGS',
+        responsive: { priority: 'low', size: 'fixed-narrow', hideMobile: true },
+        groupable: true,
+        render: (value) => value ? `${Array.isArray(value) ? value.join(', ') : value}` : '',
+      },
+      {
         field: 'name',
-        label: 'Name',
+        label: 'Namexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
         responsive: { priority: 'high', size: 'flexible-medium', allowWrap: true },
         groupable: false,
         fieldCompositeName: 'person'
@@ -205,6 +255,7 @@
         data: [...data], // Clone data to avoid interference
         columns,
         showCheckboxes: true,
+        autoFocusFirstRow: true,
         multiSelect: true,
         showHeaderSummary: true,  // Show grand total row
         showGroupSummary: true,   // Show subtotal per group
@@ -246,6 +297,45 @@
       });
 
       divTableWithoutCheckboxes.group('city');
+
+      // ============================================================
+      // Option C: Pre-filter data externally before calling replaceData()
+      // ============================================================
+      // Keep a reference to the full dataset so we can re-filter / reset
+      const fullData = [...data];
+
+      function wirePreFilter(inputId, applyBtnId, clearBtnId, tableInstance) {
+        const input = document.getElementById(inputId);
+        const applyBtn = document.getElementById(applyBtnId);
+        const clearBtn = document.getElementById(clearBtnId);
+        const engine = tableInstance.queryEngine;
+
+        function applyFilter() {
+          const expr = input.value.trim();
+          if (!expr) { clearFilter(); return; }
+          try {
+            const filtered = fullData.filter(row => engine.evaluateExpression(row, expr));
+            tableInstance.replaceData(filtered);
+            input.style.borderColor = '#10b981';
+          } catch (e) {
+            input.style.borderColor = '#ef4444';
+            console.error('Invalid pre-filter:', e.message);
+          }
+        }
+
+        function clearFilter() {
+          input.value = '';
+          input.style.borderColor = '#ced4da';
+          tableInstance.replaceData([...fullData]);
+        }
+
+        applyBtn.addEventListener('click', applyFilter);
+        clearBtn.addEventListener('click', clearFilter);
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyFilter(); });
+      }
+
+      wirePreFilter('prefilter1', 'prefilter1-apply', 'prefilter1-clear', divTableWithCheckboxes);
+      wirePreFilter('prefilter2', 'prefilter2-apply', 'prefilter2-clear', divTableWithoutCheckboxes);
 
       // Function to simulate loading data from server
       function simulateDataFetch(page, pageSize) {

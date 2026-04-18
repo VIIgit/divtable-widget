@@ -645,7 +645,7 @@
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
-  margin-left: 8px;
+  margin-left: auto;
 }
 
 .div-table-header-cell:hover {
@@ -654,12 +654,13 @@
 
 /* Group indicator styling - hidden by default */
 .group-indicator {
-  font-size: 12px;
+  font-size: 1em;
   width: 14px;
   height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s ease;
 }
@@ -681,8 +682,10 @@
 
 /* Sort indicator styling - hidden by default */
 .sort-indicator {
+  font-size: 12px;
   width: 14px;
   height: 20px;
+  margin-left: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -721,6 +724,7 @@
 .sub-sort-indicator {
   width: 14px;
   height: 20px;
+  margin-left: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -958,6 +962,7 @@ input[type="checkbox"]:indeterminate::after {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .composite-sub-header:first-child {
@@ -978,13 +983,13 @@ input[type="checkbox"]:indeterminate::after {
 /* Absolutely positioned right-side icons in composite sub-header */
 .composite-sub-header .sub-header-icons {
   position: absolute;
-  right: 4px;
+  right: 0px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
-  gap: 4px;
-  background-color: var(--dt-header-bg);
+  gap: 2px;
+  background-color: var(--dt-bg-header);
   padding-left: 4px;
 }
 
@@ -998,7 +1003,7 @@ input[type="checkbox"]:indeterminate::after {
   right: 4px;
   top: 50%;
   transform: translateY(-50%);
-  background-color: var(--dt-header-bg);
+  background-color: var(--dt-bg-header);
   padding-left: 4px;
 }
 
@@ -1529,11 +1534,10 @@ input[type="checkbox"]:indeterminate::after {
   border-bottom: 1px solid var(--dt-summary-border);
 }
 
-/* Group summary row (subtotal) */
-.div-table-row.group-summary {
+/* Group summary (now inline in group header) */
+.div-table-row.group-header .group-summary-cell {
   font-weight: 500;
   font-size: 0.95em;
-  border-bottom: 1px solid var(--dt-summary-border);
 }
 
 /* Summary cell styling */
