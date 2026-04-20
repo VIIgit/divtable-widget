@@ -712,6 +712,9 @@ function setupTokenProvider(monaco, { fieldNames, languageId }) {
   });
 }
 
+// Module-level registry to prevent duplicate validation setup per languageId
+const _validationSetup = new Map();
+
 /**
  * Sets up validation for the query language
  * @param {object} monaco The Monaco editor instance
@@ -720,12 +723,8 @@ function setupTokenProvider(monaco, { fieldNames, languageId }) {
  */
 function setupValidation(monaco, { fieldNames, languageId }) {
   // Prevent duplicate validation setup for the same language ID
-  if (monaco._validationSetup && monaco._validationSetup[languageId]) {
-    return monaco._validationSetup[languageId];
-  }
-  
-  if (!monaco._validationSetup) {
-    monaco._validationSetup = {};
+  if (_validationSetup.has(languageId)) {
+    return _validationSetup.get(languageId);
   }
 
   // Cache for tokenization and validation results
@@ -1566,14 +1565,12 @@ function setupValidation(monaco, { fieldNames, languageId }) {
       // Dispose existing model listeners
       existingModelDisposables.forEach(d => d.dispose());
       // Clean up the registration tracker
-      if (monaco._validationSetup && monaco._validationSetup[languageId]) {
-        delete monaco._validationSetup[languageId];
-      }
+      _validationSetup.delete(languageId);
     }
   };
   
   // Store the disposal function to prevent duplicate setup
-  monaco._validationSetup[languageId] = disposeFunction;
+  _validationSetup.set(languageId, disposeFunction);
   
   return disposeFunction;
 }
@@ -2011,9 +2008,7 @@ function updateQueryEditorFieldNames(monaco, languageId, newFieldNames) {
     }
 
     // Clear validation cache to ensure new provider is created with updated field names
-    if (monaco._validationSetup && monaco._validationSetup[languageId]) {
-      delete monaco._validationSetup[languageId];
-    }
+    _validationSetup.delete(languageId);
 
     // Create NEW completion provider with updated field names
     const newCompletionProvider = setupCompletionProvider(monaco, { 
