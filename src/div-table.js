@@ -5033,6 +5033,9 @@ class DivTable {
     // Clear loading state when record is added
     this.isLoadingState = false;
     
+    // Rebuild lookup map so findRowData() returns the new/updated record
+    this._buildDataMap();
+    
     // Update the query engine with new/updated data
     this.queryEngine.setObjects(this.data);
     
@@ -5062,6 +5065,9 @@ class DivTable {
       
       // Remove from selection if it was selected
       this.selectedRows.delete(recordId);
+      
+      // Rebuild lookup map so findRowData() no longer returns the removed record
+      this._buildDataMap();
       
       // Update the query engine with updated data
       this.queryEngine.setObjects(this.data);
