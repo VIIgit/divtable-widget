@@ -52,6 +52,8 @@ describe('DivTable', () => {
     if (divTable && typeof divTable.dispose === 'function') {
       divTable.dispose();
     }
+    document.querySelectorAll('.div-table-copy-chooser').forEach(el => el.remove());
+    localStorage.clear();
     document.body.removeChild(container);
     jest.clearAllMocks();
   });
@@ -273,6 +275,105 @@ describe('DivTable', () => {
       expect(divTable.selectedRows.has(1)).toBe(true);
       expect(divTable.selectedRows.has(2)).toBe(true);
       expect(divTable.selectedRows.size).toBe(2);
+    });
+  });
+
+  describe('copy behavior', () => {
+    beforeEach(() => {
+      container.id = 'copy-unit-table';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: jest.fn()
+        }
+      });
+
+      divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        lazyCellRendering: false
+      });
+    });
+
+    it('should show the chooser on first Ctrl/Cmd+C instead of copying immediately', () => {
+      const preventDefault = jest.fn();
+
+      divTable.handleKeyDown({
+        ctrlKey: true,
+        metaKey: false,
+        key: 'c',
+        preventDefault
+      });
+
+      expect(preventDefault).toHaveBeenCalled();
+      expect(document.querySelector('.div-table-copy-chooser')).not.toBeNull();
+      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    });
+
+    it('should open chooser in keyboard mode on Ctrl/Cmd+C', () => {
+      const showCopyChooser = jest.spyOn(divTable, 'showCopyChooser').mockImplementation(() => {});
+
+      divTable.handleCopyShortcut({});
+
+      expect(showCopyChooser).toHaveBeenCalledWith(null, { fromKeyboard: true });
+    });
+
+    it('should fall back to CSV in executeCopyMode when cell mode has no focused column', () => {
+      const copyRowsAsCsv = jest.spyOn(divTable, 'copyRowsAsCsv').mockImplementation(() => {});
+
+      divTable.focusedRowId = '1';
+      divTable.focusedColumnField = null;
+
+      divTable.executeCopyMode('cell');
+
+      expect(copyRowsAsCsv).toHaveBeenCalled();
+    });
+
+    it('should normalize array and object cell values before copying', () => {
+      divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: [
+          { field: 'id', primaryKey: true },
+          { field: 'tags' },
+          { field: 'meta' }
+        ],
+        data: [
+          { id: 1, tags: ['a', 'b'], meta: { city: 'Bern' } }
+        ],
+        lazyCellRendering: false
+      });
+
+      divTable.focusedRowId = '1';
+      divTable.focusedColumnField = 'tags';
+      divTable.copyCellValue();
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('a, b');
+
+      divTable.focusedColumnField = 'meta';
+      divTable.copyCellValue();
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('{"city":"Bern"}');
+    });
+
+    it('should load a persisted copy mode from localStorage', () => {
+      localStorage.setItem('divtable:copyMode:copy-unit-table', 'record');
+
+      divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        lazyCellRendering: false
+      });
+
+      expect(divTable.copyMode).toBe('record');
+      expect(divTable.copyModeFirstUse).toBe(false);
+    });
+
+    it('should copy focused record when executeCopyMode uses record mode', () => {
+      const copyFocusedRowAsCsv = jest.spyOn(divTable, 'copyFocusedRowAsCsv').mockImplementation(() => {});
+
+      divTable.executeCopyMode('record');
+
+      expect(copyFocusedRowAsCsv).toHaveBeenCalled();
     });
   });
 

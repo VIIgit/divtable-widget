@@ -134,6 +134,8 @@ describe('DivTable Integration Tests', () => {
     if (divTable && typeof divTable.dispose === 'function') {
       divTable.dispose();
     }
+    document.querySelectorAll('.div-table-copy-chooser').forEach(el => el.remove());
+    localStorage.clear();
     document.body.removeChild(container);
     jest.clearAllMocks();
   });
@@ -186,6 +188,202 @@ describe('DivTable Integration Tests', () => {
       divTable = new DivTable(mockMonaco, options);
 
       expect(container.classList.contains('no-multiselect')).toBe(true);
+    });
+  });
+
+  describe('Copy workflow integration', () => {
+    beforeEach(() => {
+      container.id = 'copy-integration-table';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: jest.fn()
+        }
+      });
+
+      divTable = new DivTable(mockMonaco, {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        lazyCellRendering: false
+      });
+    });
+
+    it('should open the chooser on right-click and copy the focused cell value', () => {
+      const firstRow = container.querySelector('.div-table-row[data-id="1"]');
+      const nameCell = firstRow.querySelector('[data-field="name"]');
+
+      nameCell.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 120,
+        clientY: 160
+      }));
+
+      const chooser = document.querySelector('.div-table-copy-chooser');
+
+      expect(chooser).not.toBeNull();
+      expect(divTable.focusedRowId).toBe('1');
+      expect(divTable.focusedColumnField).toBe('name');
+
+      chooser.querySelector('.btn-copy-cell').click();
+
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('John Doe');
+    });
+
+    it('should refresh cell preview when opening context menu on a different row', () => {
+      const firstRow = container.querySelector('.div-table-row[data-id="1"]');
+      const thirdRow = container.querySelector('.div-table-row[data-id="3"]');
+      const firstNameCell = firstRow.querySelector('[data-field="name"]');
+      const thirdNameCell = thirdRow.querySelector('[data-field="name"]');
+
+      firstNameCell.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 120,
+        clientY: 160
+      }));
+
+      let chooser = document.querySelector('.div-table-copy-chooser');
+      expect(chooser.querySelector('.btn-copy-cell').textContent).toContain('John Doe');
+
+      thirdNameCell.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 140,
+        clientY: 180
+      }));
+
+      chooser = document.querySelector('.div-table-copy-chooser');
+      expect(chooser.querySelector('.btn-copy-cell').textContent).toContain('Bob Johnson');
+    });
+
+    it('should restore previous focus when closing keyboard chooser with Escape', () => {
+      const firstRow = container.querySelector('.div-table-row[data-id="1"]');
+      const firstCheckbox = firstRow.querySelector('input[type="checkbox"]');
+
+      firstCheckbox.focus();
+      expect(document.activeElement).toBe(firstCheckbox);
+
+      const preventDefault = jest.fn();
+      divTable.handleKeyDown({
+        ctrlKey: true,
+        metaKey: false,
+        key: 'c',
+        preventDefault
+      });
+
+      expect(preventDefault).toHaveBeenCalled();
+      expect(document.querySelector('.div-table-copy-chooser')).not.toBeNull();
+
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        bubbles: true,
+        key: 'Escape'
+      }));
+
+      expect(document.querySelector('.div-table-copy-chooser')).toBeNull();
+      expect(document.activeElement).toBe(firstCheckbox);
+    });
+
+    it('should focus the first visible chooser button when opened via Ctrl/Cmd+C after context menu use', () => {
+      const firstRow = container.querySelector('.div-table-row[data-id="1"]');
+      const firstNameCell = firstRow.querySelector('[data-field="name"]');
+
+      firstNameCell.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 120,
+        clientY: 160
+      }));
+
+      expect(document.querySelector('.div-table-copy-chooser .btn-copy-cell')).not.toBeNull();
+      divTable.hideCopyChooser();
+
+      const preventDefault = jest.fn();
+      divTable.handleKeyDown({
+        ctrlKey: true,
+        metaKey: false,
+        key: 'c',
+        preventDefault
+      });
+
+      const chooser = document.querySelector('.div-table-copy-chooser');
+      const firstVisibleButton = chooser.querySelector('button');
+
+      expect(firstVisibleButton).not.toBeNull();
+      expect(firstVisibleButton.classList.contains('btn-copy-record')).toBe(true);
+      expect(document.activeElement).toBe(firstVisibleButton);
+    });
+
+    it('should not show copy-cell button when chooser is opened via Ctrl/Cmd+C', () => {
+      const row = container.querySelector('.div-table-row[data-id="1"]');
+      divTable.updateFocusState(row);
+
+      const preventDefault = jest.fn();
+      divTable.handleKeyDown({
+        ctrlKey: true,
+        metaKey: false,
+        key: 'c',
+        preventDefault
+      });
+
+      const chooser = document.querySelector('.div-table-copy-chooser');
+      expect(preventDefault).toHaveBeenCalled();
+      expect(chooser).not.toBeNull();
+      expect(chooser.querySelector('.btn-copy-cell')).toBeNull();
+      expect(chooser.querySelector('.btn-copy-record')).not.toBeNull();
+    });
+
+    it('should show and execute selected-records CSV action when rows are selected', () => {
+      divTable.selectedRows.add('1');
+      divTable.selectedRows.add('3');
+
+      const row = container.querySelector('.div-table-row[data-id="1"]');
+      divTable.updateFocusState(row);
+
+      const preventDefault = jest.fn();
+      divTable.handleKeyDown({
+        ctrlKey: true,
+        metaKey: false,
+        key: 'c',
+        preventDefault
+      });
+
+      const chooser = document.querySelector('.div-table-copy-chooser');
+      const selectedBtn = chooser.querySelector('.btn-copy-selected');
+      expect(selectedBtn).not.toBeNull();
+      expect(selectedBtn.textContent).toBe('Copy Selected Records (2, CSV)');
+      expect(chooser.querySelector('.btn-copy-all').textContent).toBe('Copy All Records (5, CSV)');
+
+      selectedBtn.click();
+
+      const csvText = navigator.clipboard.writeText.mock.calls.at(-1)[0];
+      expect(csvText).toMatch(/John Doe/);
+      expect(csvText).toMatch(/Bob Johnson/);
+      expect(csvText).not.toMatch(/Jane Smith/);
+    });
+
+    it('should copy all filtered records as CSV when Copy All Records is clicked', () => {
+      const firstRow = container.querySelector('.div-table-row[data-id="1"]');
+      const nameCell = firstRow.querySelector('[data-field="name"]');
+
+      nameCell.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 140,
+        clientY: 180
+      }));
+
+      const chooser = document.querySelector('.div-table-copy-chooser');
+      expect(chooser.querySelector('.btn-copy-all')).not.toBeNull();
+      expect(chooser.querySelector('.btn-copy-all').textContent).toBe('Copy All Records (5, CSV)');
+
+      chooser.querySelector('.btn-copy-all').click();
+
+      const csvText = navigator.clipboard.writeText.mock.calls.at(-1)[0];
+      // Should contain a header row and all data rows
+      expect(csvText).toMatch(/id,name/);
+      expect(csvText).toMatch(/John Doe/);
     });
   });
 
@@ -311,6 +509,43 @@ describe('DivTable Integration Tests', () => {
         rowId: null,
         groupKey: null
       });
+    });
+
+    it('should focus the row checkbox when clicking a data row', () => {
+      const firstRow = container.querySelector('.div-table-row[data-id="1"]');
+
+      firstRow.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true
+      }));
+
+      const firstCheckbox = firstRow.querySelector('input[type="checkbox"]');
+      expect(firstCheckbox).not.toBeNull();
+
+      expect(document.activeElement).toBe(firstCheckbox);
+    });
+
+    it('should focus the row checkbox when clicking a cell content', () => {
+      const firstRow = container.querySelector('.div-table-row[data-id="1"]');
+
+      // Ensure lazy-rendered rows have populated cells before selecting a content span
+      firstRow.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true
+      }));
+
+      const firstCheckbox = firstRow.querySelector('input[type="checkbox"]');
+      const contentSpan = firstRow.querySelector('.cell-content, .composite-main, .composite-sub, .composite-sub-cell');
+
+      expect(firstCheckbox).not.toBeNull();
+      expect(contentSpan).not.toBeNull();
+
+      contentSpan.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true
+      }));
+
+      expect(document.activeElement).toBe(firstCheckbox);
     });
   });
 

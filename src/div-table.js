@@ -72,6 +72,17 @@ class DivTable {
     this.currentQuery = '';
     this._lastFocusCallback = { rowId: null, groupKey: null }; // Track last focus callback to prevent duplicates
     this.showOnlySelected = false; // Filter toggle state
+    // Copy mode state and focused-cell tracking
+    this.copyModeKey = `divtable:copyMode:${options.tableWidgetElement?.id || 'default'}`;
+    try {
+      const savedMode = localStorage.getItem(this.copyModeKey);
+      this.copyMode = savedMode || 'cell'; // default to cell mode for first-use as per plan
+      this.copyModeFirstUse = !savedMode;
+    } catch (e) {
+      this.copyMode = 'cell';
+      this.copyModeFirstUse = true;
+    }
+    this.focusedColumnField = null; // tracks which column field is focused for cell-copy
     
     // Virtual scrolling state
     this.currentPage = 0;
@@ -864,10 +875,10 @@ class DivTable {
       return;
     }
 
-    // Ctrl+C / Cmd+C: Copy rows as CSV to clipboard
+    // Ctrl+C / Cmd+C: Copy (dispatch to cell or record copy)
     if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
       e.preventDefault();
-      this.copyRowsAsCsv();
+      this.handleCopyShortcut(e);
       return;
     }
 
@@ -961,6 +972,60 @@ class DivTable {
     }
   }
 
+  focusElementWithVisibleIndicator(element) {
+    if (!element || typeof element.focus !== 'function') return;
+
+    try {
+      element.focus({ focusVisible: true });
+    } catch (e) {
+      element.focus();
+    }
+  }
+
+  focusRowFromClick(row) {
+    let targetRow = row;
+
+    // In fixed-columns mode, a click can occur in the scroll row where no checkbox exists.
+    // Map to the corresponding fixed row so checkbox focus works consistently.
+    if (this.showCheckboxes && this.fixedColumns > 0 && row && row.dataset && row.dataset.id) {
+      const isScrollRow = row.classList && row.classList.contains('div-table-scroll-row');
+      if (isScrollRow && this.fixedBodyContainer) {
+        const fixedRow = this.fixedBodyContainer.querySelector(`.div-table-row[data-id="${row.dataset.id}"]`);
+        if (fixedRow) targetRow = fixedRow;
+      }
+    }
+
+    const focusableElement = this.getFocusableElementForRow(targetRow);
+    if (!focusableElement || typeof focusableElement.focus !== 'function') return;
+
+    const currentFocused = this.getCurrentFocusedElement();
+    if (currentFocused && currentFocused.element === focusableElement) {
+      return;
+    }
+
+    this.focusElementWithVisibleIndicator(focusableElement);
+
+    // Some browsers can temporarily move focus during the click sequence
+    // (especially on first interaction after page init). Re-assert checkbox
+    // focus at the end of the current event loop tick.
+    if (this.showCheckboxes) {
+      const checkbox = targetRow.querySelector('input[type="checkbox"]');
+      if (checkbox && checkbox !== document.activeElement) {
+        setTimeout(() => {
+          if (this._copyChooserEl) return;
+          if (checkbox.isConnected && checkbox !== document.activeElement) {
+            this.focusElementWithVisibleIndicator(checkbox);
+          }
+        }, 0);
+      }
+    }
+
+    // For non-checkbox tables, focus lands on the row itself.
+    if (!this.showCheckboxes) {
+      this.updateFocusState(targetRow);
+    }
+  }
+
   updateFocusState(row) {
     // Clear previous focus classes from both containers if using fixed columns
     if (this.fixedColumns > 0) {
@@ -993,6 +1058,8 @@ class DivTable {
     if (row.classList.contains('group-header')) {
       this.focusedRowId = null;
       this.focusedGroupKey = row.dataset.groupKey;
+      // Clear any focused column when switching to group header
+      this.focusedColumnField = null;
       if (this._copyMarkedAll && !this.showCheckboxes) {
         this.clearSelection();
       }
@@ -1027,6 +1094,8 @@ class DivTable {
         this._copyMarkedAll = false;
       }
       this.focusedRowId = row.dataset.id;
+      // Clear column focus when moving to a different row; cell selection is explicit via cell clicks
+      this.focusedColumnField = null;
       this.focusedGroupKey = null;
       
       // Only trigger callback if this is a different row than last time
@@ -1109,19 +1178,8 @@ class DivTable {
    * Header row is always included. Arrays are joined with comma before escaping.
    * Priority: _copyMarkedAll (all filtered) > selected rows > focused row only.
    */
-  copyRowsAsCsv() {
-    let rows;
-    if (this._copyMarkedAll) {
-      rows = this.filteredData;
-    } else if (this.selectedRows.size > 0) {
-      rows = this.getSelectedRows();
-    } else if (this.focusedRowId) {
-      const focusedData = this.findRowData(this.focusedRowId);
-      rows = focusedData ? [focusedData] : [];
-    } else {
-      return;
-    }
-    if (rows.length === 0) return;
+  _writeRowsAsCsv(rows) {
+    if (!rows || rows.length === 0) return;
 
     const columns = this.columns.filter(col => !col.hidden);
 
@@ -1144,6 +1202,301 @@ class DivTable {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(csv);
     }
+  }
+
+  copyRowsAsCsv() {
+    let rows;
+    if (this._copyMarkedAll) {
+      rows = this.filteredData;
+    } else if (this.selectedRows.size > 0) {
+      rows = this.getSelectedRows();
+    } else if (this.focusedRowId) {
+      const focusedData = this.findRowData(this.focusedRowId);
+      rows = focusedData ? [focusedData] : [];
+    } else {
+      return;
+    }
+    this._writeRowsAsCsv(rows);
+  }
+
+  copyFocusedRowAsCsv() {
+    if (!this.focusedRowId) return;
+    const focusedData = this.findRowData(this.focusedRowId);
+    if (!focusedData) return;
+    this._writeRowsAsCsv([focusedData]);
+  }
+
+  copySelectedRowsAsCsv() {
+    const rows = this.getSelectedRows();
+    this._writeRowsAsCsv(rows);
+  }
+
+  copyAllRowsAsCsv() {
+    this._writeRowsAsCsv(this.filteredData);
+  }
+
+  /**
+   * Dispatcher for copy shortcut. Shows first-use chooser if needed,
+   * otherwise executes the configured copy mode.
+   */
+  handleCopyShortcut(e) {
+    this.showCopyChooser(null, { fromKeyboard: true });
+  }
+
+  executeCopyMode(mode) {
+    this.copyMode = mode === 'record' ? 'record' : 'cell';
+    this.copyModeFirstUse = false;
+
+    if (this.copyMode === 'cell') {
+      if (!this.focusedRowId || !this.focusedColumnField) {
+        this.copyRowsAsCsv();
+        return;
+      }
+      this.copyCellValue();
+      return;
+    }
+
+    this.copyFocusedRowAsCsv();
+  }
+
+  copyCellValue() {
+    if (!this.focusedRowId || !this.focusedColumnField) {
+      // Nothing focused - fallback
+      this.copyRowsAsCsv();
+      return;
+    }
+
+    const rowData = this.findRowData(this.focusedRowId);
+    if (!rowData) return;
+
+    const col = this.columns.find(c => c.field === this.focusedColumnField);
+    const rawValue = rowData[this.focusedColumnField];
+    const text = this._normalizeCellValue(rawValue, col);
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text);
+    }
+
+    // Small visual feedback could be added here in the future
+  }
+
+  _normalizeCellValue(val, col) {
+    if (val === null || typeof val === 'undefined') return '';
+    if (Array.isArray(val)) return val.join(', ');
+    if (typeof val === 'object') {
+      try { return JSON.stringify(val); } catch (e) { return String(val); }
+    }
+    return String(val);
+  }
+
+  _getCellValuePreview() {
+    if (!this.focusedRowId || !this.focusedColumnField) return null;
+    const rowData = this.findRowData(this.focusedRowId);
+    if (!rowData) return null;
+    const col = this.columns.find(c => c.field === this.focusedColumnField);
+    const text = this._normalizeCellValue(rowData[this.focusedColumnField], col);
+    return text.length > 15 ? text.slice(0, 15) + '...' : text;
+  }
+
+  showCopyChooser(anchorEvent = null, options = {}) {
+    const fromKeyboard = !!options.fromKeyboard;
+    const shouldRestoreFocusOnEscape = fromKeyboard;
+
+    const chooser = this._copyChooserEl || document.createElement('div');
+
+    if (!this._copyChooserEl) {
+      chooser.className = 'div-table-copy-chooser';
+      chooser.setAttribute('role', 'dialog');
+      chooser.setAttribute('aria-label', 'Choose copy mode');
+
+      const onDocClick = (ev) => {
+        if (!chooser.contains(ev.target)) this.hideCopyChooser();
+      };
+      const onKey = (ev) => {
+        if (ev.key === 'Escape') this.hideCopyChooser({ restoreFocus: !!chooser._restoreFocusOnEscape });
+      };
+
+      document.addEventListener('click', onDocClick);
+      document.addEventListener('keydown', onKey);
+
+      chooser._cleanup = () => {
+        document.removeEventListener('click', onDocClick);
+        document.removeEventListener('keydown', onKey);
+      };
+      this._copyChooserEl = chooser;
+    }
+
+    const preview = this._getCellValuePreview();
+    const canCopyCell = !fromKeyboard && preview !== null;
+    const selectedCount = this.getValidSelectedCount();
+    const allCount = this.filteredData.length;
+    const hasSelection = selectedCount > 0;
+    chooser._restoreFocusOnEscape = shouldRestoreFocusOnEscape;
+
+    if (shouldRestoreFocusOnEscape) {
+      chooser._returnFocusEl = document.activeElement && typeof document.activeElement.focus === 'function'
+        ? document.activeElement
+        : null;
+      chooser._returnFocusRowId = this.focusedRowId;
+    } else {
+      chooser._returnFocusEl = null;
+      chooser._returnFocusRowId = null;
+    }
+
+    chooser.innerHTML = '';
+    chooser._primaryButton = null;
+
+    if (canCopyCell) {
+      const btnCell = document.createElement('button');
+      btnCell.type = 'button';
+      btnCell.className = 'btn-copy-cell';
+      btnCell.textContent = `Copy \"${preview}\"`;
+      btnCell.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hideCopyChooser();
+        this.executeCopyMode('cell');
+      });
+      chooser.appendChild(btnCell);
+      chooser._primaryButton = btnCell;
+    }
+
+    const btnRecord = document.createElement('button');
+    btnRecord.type = 'button';
+    btnRecord.className = 'btn-copy-record';
+    btnRecord.textContent = 'Copy Focused Record (CSV)';
+    btnRecord.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.hideCopyChooser();
+      this.executeCopyMode('record');
+    });
+    chooser.appendChild(btnRecord);
+
+    if (!chooser._primaryButton) {
+      chooser._primaryButton = btnRecord;
+    }
+
+    if (hasSelection) {
+      const btnSelected = document.createElement('button');
+      btnSelected.type = 'button';
+      btnSelected.className = 'btn-copy-selected';
+      btnSelected.textContent = `Copy Selected Records (${selectedCount}, CSV)`;
+      btnSelected.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hideCopyChooser();
+        this.copySelectedRowsAsCsv();
+      });
+      chooser.appendChild(btnSelected);
+    }
+
+    const btnAll = document.createElement('button');
+    btnAll.type = 'button';
+    btnAll.className = 'btn-copy-all';
+    btnAll.textContent = `Copy All Records (${allCount}, CSV)`;
+    btnAll.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.hideCopyChooser();
+      this.copyAllRowsAsCsv();
+    });
+    chooser.appendChild(btnAll);
+
+    if (!chooser.isConnected) {
+      document.body.appendChild(chooser);
+    }
+
+    chooser.classList.remove('hidden');
+    this.positionCopyChooser(chooser, anchorEvent);
+
+    if (chooser._primaryButton && typeof chooser._primaryButton.focus === 'function') {
+      chooser._primaryButton.focus();
+    }
+  }
+
+  hideCopyChooser(options = {}) {
+    const restoreFocus = !!options.restoreFocus;
+    if (!this._copyChooserEl) return;
+    const chooser = this._copyChooserEl;
+    const returnFocusEl = chooser._returnFocusEl;
+    const returnFocusRowId = chooser._returnFocusRowId;
+
+    if (this._copyChooserEl._cleanup) this._copyChooserEl._cleanup();
+    try { this._copyChooserEl.remove(); } catch (e) {}
+    this._copyChooserEl = null;
+
+    if (!restoreFocus) return;
+
+    if (returnFocusEl && returnFocusEl.isConnected && typeof returnFocusEl.focus === 'function') {
+      try { returnFocusEl.focus(); return; } catch (e) {}
+    }
+
+    if (returnFocusRowId) {
+      const selector = `.div-table-row[data-id="${returnFocusRowId}"]`;
+      const row = (this.fixedColumns > 0 && this.fixedBodyContainer
+        ? this.fixedBodyContainer.querySelector(selector)
+        : null) || (this.bodyContainer ? this.bodyContainer.querySelector(selector) : null);
+      if (row) {
+        const focusTarget = this.getFocusableElementForRow(row);
+        if (focusTarget && typeof focusTarget.focus === 'function') {
+          try { focusTarget.focus(); } catch (e) {}
+        }
+      }
+    }
+  }
+
+  positionCopyChooser(chooser, anchorEvent = null) {
+    const container = this.options.tableWidgetElement || document.body;
+    const containerRect = container.getBoundingClientRect();
+
+    const focusedRow = this.getFocusedRowElement();
+    const rowRect = focusedRow ? focusedRow.getBoundingClientRect() : null;
+    const left = rowRect
+      ? rowRect.left + 16
+      : anchorEvent && typeof anchorEvent.clientX === 'number'
+        ? anchorEvent.clientX + 8
+        : containerRect.left + 16;
+    const top = rowRect
+      ? rowRect.top + Math.max(8, Math.min(32, rowRect.height - 8))
+      : anchorEvent && typeof anchorEvent.clientY === 'number'
+        ? anchorEvent.clientY + 8
+        : containerRect.top + 16;
+
+    chooser.style.position = 'fixed';
+    chooser.style.left = `${Math.max(8, left)}px`;
+    chooser.style.top = `${Math.max(8, top)}px`;
+  }
+
+  getFocusedRowElement() {
+    if (!this.focusedRowId) return null;
+    const selector = `.div-table-row[data-id="${this.focusedRowId}"]`;
+    if (this.fixedColumns > 0 && this.fixedBodyContainer) {
+      const row = this.fixedBodyContainer.querySelector(selector);
+      if (row) return row;
+    }
+    if (this.bodyContainer) {
+      return this.bodyContainer.querySelector(selector);
+    }
+    return null;
+  }
+
+  handleCopyContextMenu(e, row, item, scrollRow = null) {
+    if (e.target.closest('.checkbox-column')) return;
+
+    e.preventDefault();
+
+    if (scrollRow) {
+      if (row.dataset.populated !== 'true') {
+        this.populateRowCellsWithFixedColumns(row, scrollRow, item);
+      }
+      this.updateFocusStateForFixedRows(row, scrollRow);
+    } else {
+      if (row.dataset.populated !== 'true') {
+        this.populateRowCells(row, item);
+      }
+      this.updateFocusState(row);
+    }
+
+    const fieldTarget = e.target.closest('[data-field]');
+    this.focusedColumnField = fieldTarget?.dataset.field || null;
+    this.showCopyChooser(e);
   }
 
   getVisibleRows() {
@@ -1234,6 +1587,8 @@ class DivTable {
     }
 
     this.focusedRowId = rowId;
+    // Clear any focused column when focusing a row programmatically
+    this.focusedColumnField = null;
   }
 
   setFocusedGroup(group) {
@@ -1244,6 +1599,7 @@ class DivTable {
 
     // Clear focused row ID since we're focusing a group
     this.focusedRowId = null;
+    this.focusedColumnField = null;
 
     // Add focus to the group header
     const groupRow = this.bodyContainer.querySelector(`[data-group-key="${group.key}"]`);
@@ -3190,19 +3546,8 @@ class DivTable {
         
         const selection = window.getSelection();
         if (selection.toString().length > 0) return;
-        
-        const focusableElement = this.getFocusableElementForRow(row);
-        if (focusableElement) {
-          const currentFocused = this.getCurrentFocusedElement();
-          if (currentFocused === focusableElement) return;
-          
-          const focusableElements = this.getAllFocusableElements();
-          const focusIndex = focusableElements.indexOf(focusableElement);
-          
-          if (focusIndex !== -1) {
-            this.focusElementAtIndex(focusIndex);
-          }
-        }
+
+        this.focusRowFromClick(row);
       });
 
       row.addEventListener('focus', (e) => {
@@ -3211,6 +3556,10 @@ class DivTable {
           this.populateRowCells(row, item);
         }
         this.updateFocusState(row);
+      });
+
+      row.addEventListener('contextmenu', (e) => {
+        this.handleCopyContextMenu(e, row, item);
       });
 
       return row;
@@ -3321,30 +3670,17 @@ class DivTable {
       if (selection.toString().length > 0) {
         return; // Don't trigger focus if user is selecting text
       }
-      
-      // Find the focusable element for this row
-      const focusableElement = this.getFocusableElementForRow(row);
-      if (focusableElement) {
-        // Check if this row already has focus
-        const currentFocused = this.getCurrentFocusedElement();
-        if (currentFocused === focusableElement) {
-          return; // Don't trigger focus event if already focused
-        }
-        
-        // Get all focusable elements and find the index of this element
-        const focusableElements = this.getAllFocusableElements();
-        const focusIndex = focusableElements.indexOf(focusableElement);
-        
-        if (focusIndex !== -1) {
-          // Use the existing focus system to set focus to this index
-          this.focusElementAtIndex(focusIndex);
-        }
-      }
+
+      this.focusRowFromClick(row);
     });
 
     // Row focus event to sync with tabIndex navigation
     row.addEventListener('focus', (e) => {
       this.updateFocusState(row);
+    });
+
+    row.addEventListener('contextmenu', (e) => {
+      this.handleCopyContextMenu(e, row, item);
     });
 
     return row;
@@ -3409,15 +3745,8 @@ class DivTable {
         
         const selection = window.getSelection();
         if (selection.toString().length > 0) return;
-        
-        const focusableElement = this.getFocusableElementForRow(fixedRow);
-        if (focusableElement) {
-          const focusableElements = this.getAllFocusableElements();
-          const focusIndex = focusableElements.indexOf(focusableElement);
-          if (focusIndex !== -1) {
-            this.focusElementAtIndex(focusIndex);
-          }
-        }
+
+        this.focusRowFromClick(fixedRow);
       };
       
       fixedRow.addEventListener('click', (e) => handleRowClick(e, fixedRow));
@@ -3428,6 +3757,13 @@ class DivTable {
           this.populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
         }
         this.updateFocusStateForFixedRows(fixedRow, scrollRow);
+      });
+
+      fixedRow.addEventListener('contextmenu', (e) => {
+        this.handleCopyContextMenu(e, fixedRow, item, scrollRow);
+      });
+      scrollRow.addEventListener('contextmenu', (e) => {
+        this.handleCopyContextMenu(e, fixedRow, item, scrollRow);
       });
       
       // Sync hover state between row parts
@@ -3530,19 +3866,19 @@ class DivTable {
       
       const selection = window.getSelection();
       if (selection.toString().length > 0) return;
-      
-      const focusableElement = this.getFocusableElementForRow(fixedRow);
-      if (focusableElement) {
-        const focusableElements = this.getAllFocusableElements();
-        const focusIndex = focusableElements.indexOf(focusableElement);
-        if (focusIndex !== -1) {
-          this.focusElementAtIndex(focusIndex);
-        }
-      }
+
+      this.focusRowFromClick(fixedRow);
     };
     
     fixedRow.addEventListener('click', (e) => handleRowClick(e, fixedRow));
     scrollRow.addEventListener('click', (e) => handleRowClick(e, scrollRow));
+
+    fixedRow.addEventListener('contextmenu', (e) => {
+      this.handleCopyContextMenu(e, fixedRow, item, scrollRow);
+    });
+    scrollRow.addEventListener('contextmenu', (e) => {
+      this.handleCopyContextMenu(e, fixedRow, item, scrollRow);
+    });
     
     // Sync hover state between row parts
     fixedRow.addEventListener('mouseenter', () => {
@@ -3573,7 +3909,8 @@ class DivTable {
     const rowId = fixedRow.dataset.id;
     if (rowId) {
       this.focusedRowId = rowId;
-      
+      // Clear focused column when row focus changes
+      this.focusedColumnField = null;
       if (this._lastFocusCallback.rowId !== rowId) {
         this._lastFocusCallback = { rowId: rowId, groupKey: null };
         const rowData = this.findRowData(rowId);
@@ -3585,22 +3922,21 @@ class DivTable {
   createCellForComposite(composite, item) {
     const cell = document.createElement('div');
     cell.className = 'div-table-cell';
-    
+
     // Apply text alignment from column config (single column only)
     if (!composite.compositeName && composite.columns[0]?.align) {
       cell.style.textAlign = composite.columns[0].align;
       cell.style.justifyContent = composite.columns[0].align === 'right' ? 'flex-end' : 
                                    composite.columns[0].align === 'center' ? 'center' : 'flex-start';
     }
-    
+
     if (composite.compositeName) {
-      // Composite cell with multiple columns stacked vertically
       cell.classList.add('composite-cell');
-      
-      composite.columns.forEach((col, index) => {
+
+      composite.columns.forEach((col) => {
         const subCell = document.createElement('div');
         subCell.className = 'composite-sub-cell';
-        
+
         if (this.groupByField && col.field === this.groupByField) {
           subCell.classList.add('grouped-column');
           subCell.textContent = '';
@@ -3610,91 +3946,109 @@ class DivTable {
             subCell.style.display = 'flex';
             subCell.style.flexDirection = 'column';
             subCell.style.gap = '2px';
-            
+
             const mainDiv = document.createElement('div');
             mainDiv.className = 'composite-main';
-            if (typeof col.render === 'function') {
-              mainDiv.innerHTML = col.render(item[col.field], item);
-            } else {
-              mainDiv.innerHTML = item[col.field] ?? '';
-            }
-            // Set title for tooltip on main content
+            mainDiv.innerHTML = typeof col.render === 'function' ? col.render(item[col.field], item) : (item[col.field] ?? '');
             mainDiv.title = this.stripHtmlTags(mainDiv.innerHTML);
-            
+
             const subDiv = document.createElement('div');
             subDiv.className = 'composite-sub';
-            if (typeof col.subRender === 'function') {
-              subDiv.innerHTML = col.subRender(item[col.subField], item);
-            } else {
-              subDiv.innerHTML = item[col.subField] ?? '';
-            }
-            // Set title for tooltip on sub content
+            subDiv.innerHTML = typeof col.subRender === 'function' ? col.subRender(item[col.subField], item) : (item[col.subField] ?? '');
             subDiv.title = this.stripHtmlTags(subDiv.innerHTML);
-            
+
+            if (col && col.field) {
+              mainDiv.dataset.field = col.field;
+              subDiv.dataset.field = col.field;
+            }
+
+            mainDiv.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              const rowEl = mainDiv.closest('.div-table-row');
+              if (rowEl && rowEl.dataset && rowEl.dataset.id) this.focusRowFromClick(rowEl);
+              this.focusedColumnField = col.field;
+            });
+            subDiv.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              const rowEl = subDiv.closest('.div-table-row');
+              if (rowEl && rowEl.dataset && rowEl.dataset.id) this.focusRowFromClick(rowEl);
+              this.focusedColumnField = col.field;
+            });
+
             subCell.appendChild(mainDiv);
             subCell.appendChild(subDiv);
           } else {
-            if (typeof col.render === 'function') {
-              subCell.innerHTML = col.render(item[col.field], item);
-            } else {
-              subCell.innerHTML = item[col.field] ?? '';
-            }
-            // Set title for tooltip on sub-cell
+            subCell.innerHTML = typeof col.render === 'function' ? col.render(item[col.field], item) : (item[col.field] ?? '');
             subCell.title = this.stripHtmlTags(subCell.innerHTML);
+            if (col && col.field) subCell.dataset.field = col.field;
+            subCell.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              const rowEl = subCell.closest('.div-table-row');
+              if (rowEl && rowEl.dataset && rowEl.dataset.id) this.focusRowFromClick(rowEl);
+              this.focusedColumnField = col.field;
+            });
           }
         }
-        
+
         cell.appendChild(subCell);
       });
     } else {
-      // Single column
       const col = composite.columns[0];
-      
+
       if (this.groupByField && col.field === this.groupByField) {
         cell.classList.add('grouped-column');
         cell.textContent = '';
       } else {
         if (col.subField) {
           cell.classList.add('composite-column');
-          
+
           const mainDiv = document.createElement('div');
           mainDiv.className = 'composite-main';
-          if (typeof col.render === 'function') {
-            mainDiv.innerHTML = col.render(item[col.field], item);
-          } else {
-            mainDiv.innerHTML = item[col.field] ?? '';
-          }
-          // Set title for tooltip on main content
+          mainDiv.innerHTML = typeof col.render === 'function' ? col.render(item[col.field], item) : (item[col.field] ?? '');
           mainDiv.title = this.stripHtmlTags(mainDiv.innerHTML);
-          
+
           const subDiv = document.createElement('div');
           subDiv.className = 'composite-sub';
-          if (typeof col.subRender === 'function') {
-            subDiv.innerHTML = col.subRender(item[col.subField], item);
-          } else {
-            subDiv.innerHTML = item[col.subField] ?? '';
-          }
-          // Set title for tooltip on sub content
+          subDiv.innerHTML = typeof col.subRender === 'function' ? col.subRender(item[col.subField], item) : (item[col.subField] ?? '');
           subDiv.title = this.stripHtmlTags(subDiv.innerHTML);
-          
+
+          if (col && col.field) {
+            mainDiv.dataset.field = col.field;
+            subDiv.dataset.field = col.field;
+          }
+
+          mainDiv.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const rowEl = mainDiv.closest('.div-table-row');
+            if (rowEl && rowEl.dataset && rowEl.dataset.id) this.focusRowFromClick(rowEl);
+            this.focusedColumnField = col.field;
+          });
+          subDiv.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const rowEl = subDiv.closest('.div-table-row');
+            if (rowEl && rowEl.dataset && rowEl.dataset.id) this.focusRowFromClick(rowEl);
+            this.focusedColumnField = col.field;
+          });
+
           cell.appendChild(mainDiv);
           cell.appendChild(subDiv);
         } else {
-          // Wrap content in a span for proper flex alignment
           const contentSpan = document.createElement('span');
           contentSpan.className = 'cell-content';
-          if (typeof col.render === 'function') {
-            contentSpan.innerHTML = col.render(item[col.field], item);
-          } else {
-            contentSpan.innerHTML = item[col.field] ?? '';
-          }
-          // Set title for tooltip
+          contentSpan.innerHTML = typeof col.render === 'function' ? col.render(item[col.field], item) : (item[col.field] ?? '');
           contentSpan.title = this.stripHtmlTags(contentSpan.innerHTML);
+          if (col && col.field) contentSpan.dataset.field = col.field;
+          contentSpan.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const rowEl = contentSpan.closest('.div-table-row');
+            if (rowEl && rowEl.dataset && rowEl.dataset.id) this.focusRowFromClick(rowEl);
+            this.focusedColumnField = col.field;
+          });
           cell.appendChild(contentSpan);
         }
       }
     }
-    
+
     return cell;
   }
 

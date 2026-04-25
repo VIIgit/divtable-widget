@@ -1572,3 +1572,34 @@ input[type="checkbox"]:indeterminate::after {
 .div-table-cell.summary-cell:empty {
   min-height: 1em;
 }
+
+/* Copy chooser (first-use prompt) */
+.div-table-copy-chooser {
+  position: absolute;
+  z-index: 9999;
+  background: var(--dt-bg-base);
+  border: 1px solid var(--dt-border-medium);
+  box-shadow: 0 6px 18px var(--dt-shadow);
+  padding: 8px;
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.div-table-copy-chooser button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dt-border-medium);
+  background: var(--dt-button-bg);
+  cursor: pointer;
+  color: var(--dt-text-primary);
+}
+.div-table-copy-chooser .remember {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  color: var(--dt-text-muted);
+}
+.div-table-copy-chooser.hidden { display: none; }
