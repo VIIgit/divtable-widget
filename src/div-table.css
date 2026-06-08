@@ -94,6 +94,9 @@
   
   /* === Summary Row === */
   --dt-summary-border: #adb5bd;
+  
+  /* === Indicator Light Background === */
+  --dt-indicator-bg-light: rgba(0, 122, 255, 0.08);
 }
 
 /* Table widget container */
@@ -234,7 +237,9 @@
 }
 
 /* Refresh button in info section */
-.refresh-button {
+.refresh-button,
+.auto-fetch-button,
+.filter-selected-only-toggle-button {
   background: none;
   border: none;
   color: var(--dt-text-light);
@@ -252,12 +257,16 @@
   min-height: 22px;
 }
 
-.refresh-button:hover {
+.refresh-button:hover,
+.auto-fetch-button:hover,
+.filter-selected-only-toggle-button:hover {
   background-color: var(--dt-button-bg);
   color: var(--dt-button-text);
 }
 
-.refresh-button:active {
+.refresh-button:active,
+.auto-fetch-button:active,
+.filter-selected-only-toggle-button:active {
   background-color: var(--dt-button-bg-hover);
 }
 
@@ -269,7 +278,9 @@
   animation: spin 1s linear infinite;
 }
 
-.refresh-button svg {
+.refresh-button svg,
+.auto-fetch-button svg,
+.filter-selected-only-toggle-button svg {
   width: 14px;
   height: 14px;
   transition: transform 0.2s ease;
@@ -277,31 +288,7 @@
 
 /* Auto-fetch button in info section */
 .auto-fetch-button {
-  background: none;
-  border: none;
-  color: var(--dt-text-light);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
   margin-left: 4px;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  min-height: 22px;
-}
-
-.auto-fetch-button:hover {
-  background-color: var(--dt-button-bg);
-  color: var(--dt-button-text);
-}
-
-.auto-fetch-button:active {
-  background-color: var(--dt-button-bg-hover);
 }
 
 .auto-fetch-button.active {
@@ -327,54 +314,9 @@
   cursor: not-allowed;
 }
 
-.auto-fetch-button svg {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.2s ease;
-}
-
 /* Filter selected only toggle button for showing only selected rows */
 .filter-selected-only-toggle-button {
-  background: none;
-  border: none;
-  color: var(--dt-text-light);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
   margin-right: 6px;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  min-height: 22px;
-}
-
-.filter-selected-only-toggle-button:hover {
-  background-color: var(--dt-button-bg);
-  color: var(--dt-button-text);
-}
-
-.filter-selected-only-toggle-button:active {
-  background-color: var(--dt-button-bg-hover);
-}
-
-.filter-selected-only-toggle-button.active {
-  color: var(--dt-info);
-  background-color: var(--dt-info-bg);
-}
-
-.filter-selected-only-toggle-button.active:hover {
-  background-color: var(--dt-info-bg-hover);
-}
-
-.filter-selected-only-toggle-button svg {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.2s ease;
 }
 
 .info-selection {
@@ -497,7 +439,7 @@
 
 .loading-progress[data-state="filtered"] .loading-progress-bar.loading::after {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
-  animation: filtered-shimmer 2s infinite;
+  animation: loading-shimmer 2s infinite;
 }
 
 .loading-progress[data-state="loading"] .loading-progress-bar {
@@ -505,23 +447,8 @@
 }
 
 @keyframes loading-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes filtered-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-
-  100% {
-    transform: translateX(100%);
-  }
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 /* Table container using CSS Grid */
@@ -618,133 +545,114 @@
   cursor: pointer;
   user-select: none;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
   transition: background-color 0.2s ease;
   overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+/* Grouped column header - ensure minimum width */
+.div-table-header-cell.grouped-column {
+  min-width: 100px;
 }
 
 .header-left-content {
   display: flex;
   align-items: center;
   gap: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   font-weight: 600;
+  max-width: 100%;
 }
 
 .header-left-content > span {
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
+/* === HOVER-REVEAL TOOLBAR === */
 .header-right-content {
   display: flex;
   align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  margin-left: auto;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--dt-bg-light);
+  border: 1px solid var(--dt-border-light);
+  
+  /* Absolutely positioned - does not affect layout */
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%) scale(0.92);
+  z-index: 10;
+  
+  /* Hidden by default with subtle animation */
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+/* Show toolbar on header hover */
+.div-table-header-cell:hover .header-right-content {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+  pointer-events: auto;
 }
 
 .div-table-header-cell:hover {
   background-color: var(--dt-shadow);
 }
 
-/* Group indicator styling - hidden by default */
-.group-indicator {
-  font-size: 1em;
-  width: 14px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-/* Show group indicator on hover of header cell */
-.div-table-header-cell:hover .group-indicator {
-  opacity: 0.5;
-}
-
-.group-indicator:hover {
-  opacity: 1 !important;
-}
-
-/* When column is grouped, always show indicator at full opacity */
-.group-indicator.grouped {
-  opacity: 1 !important;
-  color: inherit;
-}
-
-/* Sort indicator styling - hidden by default */
-.sort-indicator {
-  font-size: 12px;
-  width: 14px;
-  height: 20px;
-  margin-left: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-/* Show sort indicator on hover of header cell */
-.div-table-header-cell:hover .sort-indicator {
-  opacity: 0.5;
-}
-
-/* Always show active sort indicator */
-.sort-indicator.active {
-  opacity: 1 !important;
-  background: var(--dt-bg-light);
-}
-
-/* Legacy: Sort indicator in header-right-content - hidden by default */
-.header-right-content > span:last-child:not(.group-indicator):not(.sort-indicator) {
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-/* Show sort indicator on hover */
-.div-table-header-cell:hover .header-right-content > span:last-child:not(.group-indicator):not(.sort-indicator) {
-  opacity: 0.5;
-}
-
-/* Always show active sort indicator */
-.div-table-header-cell.sorted .header-right-content > span:last-child:not(.sort-indicator) {
-  opacity: 1 !important;
-}
-
-/* Composite header sub-sort indicator - hidden by default */
+/* Indicator styling - shared base for group, sort, and sub-sort indicators */
+.group-indicator,
+.sort-indicator,
 .sub-sort-indicator {
-  width: 14px;
-  height: 20px;
-  margin-left: 4px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  border-radius: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
-/* Show sub-sort indicator on hover of the composite header cell */
-.composite-header:hover .sub-sort-indicator {
-  opacity: 0.5;
+.group-indicator {
+  font-size: 0.9em;
 }
 
-/* Show sub-sort indicator on hover of the sub-header itself */
-.composite-sub-header:hover .sub-sort-indicator {
-  opacity: 0.5;
+.sort-indicator {
+  font-size: 0.8em;
 }
 
-/* Always show active sub-sort indicator */
+.sub-sort-indicator {
+  cursor: pointer;
+}
+
+/* Indicator hover state */
+.group-indicator:hover,
+.sort-indicator:hover,
+.sub-sort-indicator:hover {
+  opacity: 1;
+  background-color: var(--dt-bg-hover);
+}
+
+/* Indicator active/grouped state */
+.group-indicator.grouped,
+.sort-indicator.active,
 .sub-sort-indicator.active {
-  opacity: 1 !important;
+  opacity: 1;
+  color: var(--dt-primary);
+  background-color: var(--dt-indicator-bg-light);
 }
 
 /* Checkbox column */
@@ -864,15 +772,21 @@ input[type="checkbox"]:indeterminate::after {
   background-color: var(--dt-primary);
 }
 
-/* Group toggle button styling */
+/* Group and composite toggle button styling */
 .group-toggle,
-.group-toggle-all {
+.group-toggle-all,
+.composite-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   font-size: 0.9em;
   transition: transform 0.2s ease;
+  user-select: none;
+}
+
+.group-toggle,
+.group-toggle-all {
   transform: rotate(90deg);
   min-width: 20px;
   min-height: 20px;
@@ -892,7 +806,8 @@ input[type="checkbox"]:indeterminate::after {
 }
 
 .group-toggle:hover,
-.group-toggle-all:hover {
+.group-toggle-all:hover,
+.composite-toggle:hover {
   opacity: 0.7;
   background-color: var(--dt-shadow);
 }
@@ -901,6 +816,7 @@ input[type="checkbox"]:indeterminate::after {
 .div-table-cell.grouped-column {
   color: var(--dt-text-disabled);
   font-style: italic;
+  min-width: 100px;
 }
 
 /* Composite column styling - for stacked fields in one column (subField) */
@@ -938,6 +854,7 @@ input[type="checkbox"]:indeterminate::after {
 
 .composite-sub-cell:first-child {
   margin-bottom: 4px;
+  align-items: flex-start;
 }
 
 .composite-sub-cell:not(:first-child) {
@@ -1020,54 +937,17 @@ input[type="checkbox"]:indeterminate::after {
   opacity: 0.5;
 }
 
-/* Composite toggle button styling */
-.composite-toggle {
-  display: inline-block;
-  cursor: pointer;
-  font-size: 0.9em;
-  transition: transform 0.2s ease;
-  user-select: none;
-}
-
-.composite-toggle:hover {
-  opacity: 0.7;
-}
-
 /* Hide collapsed group rows */
 .div-table-row.group-collapsed {
   display: none;
 }
 
 /* Responsive column sizes */
-.col-fixed-narrow {
-  grid-column: span 1;
-  min-width: 60px;
-  max-width: 80px;
-}
-
-.col-fixed-medium {
-  grid-column: span 1;
-  min-width: 100px;
-  max-width: 140px;
-}
-
-.col-flexible-small {
-  grid-column: span 1;
-  min-width: 120px;
-  flex: 1;
-}
-
-.col-flexible-medium {
-  grid-column: span 2;
-  min-width: 150px;
-  flex: 2;
-}
-
-.col-flexible-large {
-  grid-column: span 3;
-  min-width: 200px;
-  flex: 3;
-}
+.col-fixed-narrow { grid-column: span 1; min-width: 60px; max-width: 80px; }
+.col-fixed-medium { grid-column: span 1; min-width: 100px; max-width: 140px; }
+.col-flexible-small { grid-column: span 1; min-width: 120px; flex: 1; }
+.col-flexible-medium { grid-column: span 2; min-width: 150px; flex: 2; }
+.col-flexible-large { grid-column: span 3; min-width: 200px; flex: 3; }
 
 /* Dynamic grid template - will be set by JavaScript */
 .div-table-header.grid-5-cols,
@@ -1268,20 +1148,12 @@ input[type="checkbox"]:indeterminate::after {
   flex-direction: column;
   gap: 0;
   align-items: stretch;
+  transition: background 0.2s ease;
+  cursor: pointer;
 }
 
-/* Top-align composite-sub-cell only within composite-cell */
-.div-table-cell.composite-cell .composite-sub-cell {
-  align-items: flex-start;
-}
-
-.retry-button:hover {
-  background: var(--dt-error-hover);
-}
-
-.retry-button:active {
-  background: var(--dt-error-active);
-}
+.retry-button:hover { background: var(--dt-error-hover); }
+.retry-button:active { background: var(--dt-error-active); }
 
 /* ============================================
    Fixed Columns Layout
@@ -1478,9 +1350,9 @@ input[type="checkbox"]:indeterminate::after {
 }
 
 .div-table-scroll-section .header-left-content > span {
-  overflow: visible;
+  overflow: hidden;
   text-overflow: clip;
-  white-space: nowrap;
+  word-wrap: break-word;
 }
 
 /* Ensure scroll section rows don't constrain content */
