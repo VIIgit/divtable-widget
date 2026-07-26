@@ -80,7 +80,7 @@
     </div>
     <div class="table-layout">
       <div class="table-section">
-        <div id="divtable2" class="div-table-widget">
+        <div id="divtable2" class="div-table-widget" style="max-height: 500px; min-height: 500px" >
         </div>
       </div>
       <div class="details-section">
@@ -434,6 +434,18 @@
             {
               field: 'department',
               label: 'Department',
+              responsive: { priority: 'medium', size: 'flexible-large', allowWrap: true },
+              groupable: true
+            },
+            {
+              field: 'department2',
+              label: 'Department 2',
+              responsive: { priority: 'medium', size: 'flexible-medium', allowWrap: true },
+              groupable: true
+            },
+            {
+              field: 'department3',
+              label: 'Department 3',
               responsive: { priority: 'medium', size: 'flexible-large', allowWrap: true },
               groupable: true
             },

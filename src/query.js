@@ -23,6 +23,19 @@ function setupLanguageConfiguration(monaco, languageId) {
   });
 }
 
+// Pre-compiled regex patterns and cached computations (module-level for performance)
+// Using conditional check to handle re-evaluation in tests (eval() in test files)
+if (typeof _fieldPatternCache === 'undefined') {
+  var _fieldPatternCache = new Map();
+  var _descriptionCache = new Map();
+  var _fieldListCache = new Map();
+  
+  // Pre-compiled regex patterns - shared across all functions
+  var _operatorPattern = /^(!=|>=|<=)/;
+  var _numberPattern = /^-?\d*\.?\d+/;
+  var _wordPattern = /^[a-zA-Z_]\w*/;
+}
+
 /**
  * Sets up the completion provider for the query language
  * @param {object} monaco The Monaco editor instance
@@ -30,6 +43,40 @@ function setupLanguageConfiguration(monaco, languageId) {
  * @param {object} options.fieldNames The field name definitions
  */
 function setupCompletionProvider(monaco, { fieldNames, languageId }) {
+  // Get cached field pattern, descriptions, and list for this field set
+  const fieldNamesCacheKey = JSON.stringify(Object.keys(fieldNames).sort());
+  
+  let fieldPattern = _fieldPatternCache.get(fieldNamesCacheKey);
+  let descriptions = _descriptionCache.get(fieldNamesCacheKey);
+  let fieldList = _fieldListCache.get(fieldNamesCacheKey);
+  
+  if (!fieldPattern) {
+    const keys = Object.keys(fieldNames);
+    fieldPattern = new RegExp(`^(${keys.join('|')})$`);
+    _fieldPatternCache.set(fieldNamesCacheKey, fieldPattern);
+    
+    // Pre-compute descriptions for all fields
+    descriptions = {
+      '=': 'Equals operator',
+      '!=': 'Not equals operator',
+      '>': 'Greater than operator',
+      '<': 'Less than operator',
+      'IN': 'Check if a value is in a list',
+      'AND': 'Logical AND operator',
+      'OR': 'Logical OR operator',
+      'true': 'Boolean true value',
+      'false': 'Boolean false value'
+    };
+    
+    // Add field descriptions without creating intermediate arrays
+    for (const [key, attr] of Object.entries(fieldNames)) {
+      descriptions[key] = `${key} (${attr.type}${attr.values ? `: One of [${attr.values.join(', ')}]` : ''})`;
+    }
+    _descriptionCache.set(fieldNamesCacheKey, descriptions);
+    
+    fieldList = Object.keys(fieldNames);
+    _fieldListCache.set(fieldNamesCacheKey, fieldList);
+  }
   // Set up auto-insertion of brackets after "IN " is typed
   function setupAutoInsertBrackets(editor) {
     const disposable = editor.onDidChangeModelContent((e) => {
@@ -112,11 +159,10 @@ function setupCompletionProvider(monaco, { fieldNames, languageId }) {
   }
 
   // Create patterns for matching with better context awareness
-  const fieldPattern = new RegExp(`^(${Object.keys(fieldNames).join('|')})$`);
+  // Note: operPattern, inPattern, logicalPattern are recreated here for local use
   const operPattern = /^(=|!=|>=|<=|>|<)$/i;
   const inPattern = /^IN$/; // Case-sensitive IN operator
   const logicalPattern = /^(AND|OR)$/; // Case-sensitive logical operators
-  const fieldList = Object.keys(fieldNames);
   
 
   // Documentation helper
@@ -157,22 +203,6 @@ function setupCompletionProvider(monaco, { fieldNames, languageId }) {
     return `${order[type]}${labelStr.toLowerCase()}`;
   }
 
-  // Operator descriptions
-  const descriptions = {
-    '=': 'Equals operator',
-    '!=': 'Not equals operator',
-    '>': 'Greater than operator',
-    '<': 'Less than operator',
-    'IN': 'Check if a value is in a list',
-    'AND': 'Logical AND operator',
-    'OR': 'Logical OR operator',
-    'true': 'Boolean true value',
-    'false': 'Boolean false value',
-    ...Object.fromEntries(Object.entries(fieldNames).map(([key, attr]) => 
-      [key, `${key} (${attr.type}${attr.values ? `: One of [${attr.values.join(', ')}]` : ''})`]
-    ))
-  };
-
   // Helper to get value suggestions based on field type
   function getValueSuggestions(field, fieldName = 'unknown') {
     const suggestions = [];
@@ -197,18 +227,19 @@ function setupCompletionProvider(monaco, { fieldNames, languageId }) {
         }
       );
     } else if (field.type === 'string' && field.values) {
-      console.log(`🔍 Generating suggestions for field "${fieldName}" with values:`, field.values);
-      const newSuggestions = field.values.map(v => ({
-        label: v === 'NULL' ? 'NULL' : `"${v}"`,
-        kind: monaco.languages.CompletionItemKind.Value,
-        insertText: v === 'NULL' ? 'NULL' : `"${v}"`,
-        documentation: v === 'NULL' ? 
-          docMarkdown('Special keyword for null/undefined/empty values') :
-          docMarkdown(`String value "${v}"`),
-        sortText: getSortText('value', v)
-      }));
-      console.log(`📋 Generated ${newSuggestions.length} suggestions for field "${fieldName}"`);
-      suggestions.push(...newSuggestions);
+      // Optimize: avoid .map() to reduce intermediate array allocation
+      for (let i = 0; i < field.values.length; i++) {
+        const v = field.values[i];
+        suggestions.push({
+          label: v === 'NULL' ? 'NULL' : `"${v}"`,
+          kind: monaco.languages.CompletionItemKind.Value,
+          insertText: v === 'NULL' ? 'NULL' : `"${v}"`,
+          documentation: v === 'NULL' ? 
+            docMarkdown('Special keyword for null/undefined/empty values') :
+            docMarkdown(`String value "${v}"`),
+          sortText: getSortText('value', v)
+        });
+      }
     } else if (field.type === 'string' && !field.values) {
       // For string fields without predefined values, suggest empty quotes with cursor positioning
       suggestions.push({
@@ -414,12 +445,12 @@ function setupCompletionProvider(monaco, { fieldNames, languageId }) {
     return context;
   }
 
-  const triggerCharacters= [
-      // Add all alphabetical characters first
-      ...Array.from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'),
-      // Then add other special characters
-      ',', ' ', '=', '!', '>', '<', '[', ']', '(', ')', '"', "'"
-    ];
+  // Pre-compute trigger characters to avoid array spreading on every provider setup
+  const triggerCharacters = [
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    ',', ' ', '=', '!', '>', '<', '[', ']', '(', ')', '"', "'"
+  ];
   const completionProvider = monaco.languages.registerCompletionItemProvider(languageId, {
     triggerCharacters,
     provideCompletionItems: (model, position) => {
@@ -452,12 +483,22 @@ function setupCompletionProvider(monaco, { fieldNames, languageId }) {
       }
 
       // Detect if we're in search mode or structured query mode
-      const hasOperators = tokens.some(token => 
-        ['=', '!=', '>', '<', '>=', '<=', 'IN', 'AND', 'OR','(', ')'].includes(token)
-      );
+      let hasOperators = false;
+      const operatorSet = { '=': 1, '!=': 1, '>': 1, '<': 1, '>=': 1, '<=': 1, 'IN': 1, 'AND': 1, 'OR': 1, '(': 1, ')': 1 };
+      for (let i = 0; i < tokens.length; i++) {
+        if (operatorSet[tokens[i]]) {
+          hasOperators = true;
+          break;
+        }
+      }
 
-      // Count meaningful tokens (exclude empty strings)
-      const meaningfulTokens = tokens.filter(token => token.trim().length > 0);
+      // Count meaningful tokens (exclude empty strings) - use for loop instead of filter
+      const meaningfulTokens = [];
+      for (let i = 0; i < tokens.length; i++) {
+        if (tokens[i].trim().length > 0) {
+          meaningfulTokens.push(tokens[i]);
+        }
+      }
       const isFirstWord = meaningfulTokens.length <= 1 && !context.needsOperator;
 
       // Get the current word being typed
@@ -466,21 +507,20 @@ function setupCompletionProvider(monaco, { fieldNames, languageId }) {
 
       // Special handling for first word - show both structured and search suggestions
       if (isFirstWord && !hasOperators && currentWord.length >= 1 && /^[a-zA-Z]+$/.test(currentWord)) {
-        // Show field name suggestions (for structured mode)
-        const matchingFields = fieldList.filter(f => 
-          f.toLowerCase().startsWith(currentWord.toLowerCase())
-        );
-        
-        if (matchingFields.length > 0) {
-          suggestions.push(...matchingFields.map(f => ({
-            label: f,
-            kind: monaco.languages.CompletionItemKind.Field,
-            insertText: `${f} `,
-            documentation: docMarkdown(`Field: ${descriptions[f] || f}\n\nClick to start a structured query with this field.`),
-            detail: 'Field (start structured query)',
-            sortText: `0_field_${f}`, // Sort fields first
-            command: { id: 'editor.action.triggerSuggest' } // Auto-trigger next suggestions
-          })));
+        // Show field name suggestions (for structured mode) - use for loop to avoid filter+map
+        for (let i = 0; i < fieldList.length; i++) {
+          const f = fieldList[i];
+          if (f.toLowerCase().startsWith(currentWord.toLowerCase())) {
+            suggestions.push({
+              label: f,
+              kind: monaco.languages.CompletionItemKind.Field,
+              insertText: `${f} `,
+              documentation: docMarkdown(`Field: ${descriptions[f] || f}\n\nClick to start a structured query with this field.`),
+              detail: 'Field (start structured query)',
+              sortText: `0_field_${f}`, // Sort fields first
+              command: { id: 'editor.action.triggerSuggest' } // Auto-trigger next suggestions
+            });
+          }
         }
 
         // Show search mode suggestion for any alphabetical input
@@ -713,7 +753,9 @@ function setupTokenProvider(monaco, { fieldNames, languageId }) {
 }
 
 // Module-level registry to prevent duplicate validation setup per languageId
-const _validationSetup = new Map();
+if (typeof _validationSetup === 'undefined') {
+  var _validationSetup = new Map();
+}
 
 /**
  * Sets up validation for the query language
@@ -731,7 +773,11 @@ function setupValidation(monaco, { fieldNames, languageId }) {
   const tokenCache = new Map();
   const validationCache = new Map();
 
-  // Enhanced tokenizer
+  // _charCodes - pre-cache character code checks for optimization
+  const _charCodes = {};
+  // Pre-cache character code checks
+  '=<>()[]",-'.split('').forEach(c => _charCodes[c] = true);
+  
   function tokenize(str) {
     // Check cache first
     const cached = tokenCache.get(str);
@@ -741,54 +787,53 @@ function setupValidation(monaco, { fieldNames, languageId }) {
 
     const tokens = [];
     let position = 0;
+    const strLen = str.length;
     
-    while (position < str.length) {
-      // Skip whitespace
-      if (/\s/.test(str[position])) {
+    while (position < strLen) {
+      const char = str[position];
+      const charCode = char.charCodeAt(0);
+      
+      // Fast path: skip whitespace
+      if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
         position++;
         continue;
       }
       
-      let match = null;
       let value = '';
       let type = '';
-      let tokenStart = position;
+      const tokenStart = position;
       
-      // Check for specific patterns in order of priority
-      
-      // 1. Operators (multi-character first)
-      if (str.substring(position).match(/^(!=|>=|<=)/)) {
-        const op = str.substring(position).match(/^(!=|>=|<=)/)[0];
-        value = op;
-        type = 'operator';
-        position += op.length;
-      }
-      // 2. Single character operators
-      else if (/[=<>]/.test(str[position])) {
-        value = str[position];
-        type = 'operator';
-        position++;
-      }
-      // 3. Punctuation
-      else if (/[(),\[\]]/.test(str[position])) {
-        value = str[position];
+      if (char === '!' || char === '=' || char === '<' || char === '>' || char === ',') {
+        // Check for multi-char operators first (faster than substring+regex)
+        if (char === '!' && position + 1 < strLen && str[position + 1] === '=') {
+          value = '!=';
+          type = 'operator';
+          position += 2;
+        } else if ((char === '>' || char === '<') && position + 1 < strLen && str[position + 1] === '=') {
+          value = char + '=';
+          type = 'operator';
+          position += 2;
+        } else if (char === '=' || char === '<' || char === '>') {
+          value = char;
+          type = 'operator';
+          position++;
+        } else if (char === ',') {
+          value = ',';
+          type = 'punctuation';
+          position++;
+        }
+      } else if (char === '(' || char === ')' || char === '[' || char === ']') {
+        value = char;
         type = 'punctuation';
         position++;
-      }
-      // 4. Comma
-      else if (str[position] === ',') {
-        value = ',';
-        type = 'punctuation';
-        position++;
-      }
-      // 5. Quoted strings (including unclosed ones)
-      else if (str[position] === '"') {
+      } else if (char === '"') {
+        // Quoted string
         let endQuoteFound = false;
         let stringEnd = position + 1;
         
-        // Look for closing quote, handling escaped quotes
-        while (stringEnd < str.length) {
-          if (str[stringEnd] === '"' && str[stringEnd - 1] !== '\\') {
+        // Look for closing quote
+        while (stringEnd < strLen) {
+          if (str[stringEnd] === '"' && (stringEnd === 0 || str[stringEnd - 1] !== '\\')) {
             endQuoteFound = true;
             stringEnd++;
             break;
@@ -799,36 +844,34 @@ function setupValidation(monaco, { fieldNames, languageId }) {
         value = str.substring(position, stringEnd);
         type = endQuoteFound ? 'string' : 'unclosed-string';
         position = stringEnd;
-      }
-      // 6. Numbers
-      else if (/\d/.test(str[position]) || (str[position] === '-' && /\d/.test(str[position + 1]))) {
-        const numberMatch = str.substring(position).match(/^-?\d*\.?\d+/);
+      } else if (char === '-' && position + 1 < strLen && str.charCodeAt(position + 1) >= 48 && str.charCodeAt(position + 1) <= 57) {
+        // Negative number - use char codes (48-57 = 0-9)
+        const numberMatch = str.substring(position).match(_numberPattern);
         if (numberMatch) {
           value = numberMatch[0];
           type = 'number';
           position += value.length;
-        } else {
-          // Fallback - treat as identifier
-          const identifierMatch = str.substring(position).match(/^\w+/);
-          value = identifierMatch ? identifierMatch[0] : str[position];
-          type = 'identifier';
+        }
+      } else if (charCode >= 48 && charCode <= 57) {
+        // Digit (0-9)
+        const numberMatch = str.substring(position).match(_numberPattern);
+        if (numberMatch) {
+          value = numberMatch[0];
+          type = 'number';
           position += value.length;
         }
-      }
-      // 7. Keywords and identifiers
-      else if (/[a-zA-Z_]/.test(str[position])) {
-        const wordMatch = str.substring(position).match(/^[a-zA-Z_]\w*/);
+      } else if ((charCode >= 65 && charCode <= 90) || (charCode >= 97 && charCode <= 122) || char === '_') {
+        // Letter or underscore - use optimized word matching
+        const wordMatch = str.substring(position).match(_wordPattern);
         if (wordMatch) {
           value = wordMatch[0];
           
-          // Check for keywords (case-sensitive for logical operators)
-          if (['AND', 'OR'].includes(value)) { // Case-sensitive check
+          // Check for keywords - fast exact checks
+          if (value === 'AND' || value === 'OR' || value === 'IN') {
             type = 'keyword';
-          } else if (value === 'IN') { // Case-sensitive
-            type = 'keyword';
-          } else if (['true', 'false'].includes(value.toLowerCase())) {
+          } else if (value === 'true' || value === 'false') {
             type = 'boolean';
-          } else if (value.toLowerCase() === 'null') {
+          } else if (value === 'null' || value === 'NULL') {
             type = 'null';
           } else {
             type = 'identifier';
@@ -836,15 +879,13 @@ function setupValidation(monaco, { fieldNames, languageId }) {
           
           position += value.length;
         } else {
-          // Single character fallback
-          value = str[position];
+          value = char;
           type = 'identifier';
           position++;
         }
-      }
-      // 8. Fallback for any other character
-      else {
-        value = str[position];
+      } else {
+        // Fallback for any other character
+        value = char;
         type = 'identifier';
         position++;
       }
@@ -860,7 +901,7 @@ function setupValidation(monaco, { fieldNames, languageId }) {
     }
 
     // Cache the result if it's not too large (prevent memory issues)
-    if (str.length < 10000) {
+    if (strLen < 10000) {
       tokenCache.set(str, tokens);
     }
 

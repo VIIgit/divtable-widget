@@ -3,6 +3,7 @@
  * Provides the same functionality as SmartTable but with a more flexible div-based layout
  */
 class DivTable {
+
   constructor(monaco, options) {
     this.monaco = monaco;
     this.options = options;
@@ -105,9 +106,6 @@ class DivTable {
     this.lazyRenderMargin = options.lazyRenderMargin || '200px'; // Pre-render rows slightly before visible
     this.rowObserver = null; // IntersectionObserver for lazy rendering
     
-    // Aggregate summary row options
-    // Header summary shows totals for entire dataset (grand total)
-    // Group summary shows totals per group when data is grouped
     this.showHeaderSummary = options.showHeaderSummary || false;
     this.showGroupSummary = options.showGroupSummary || false;
     
@@ -120,13 +118,15 @@ class DivTable {
     
     // Initialize QueryEngine like in smart-table with primary key field
     this.queryEngine = new QueryEngine(this.data, this.primaryKeyField);
-
-    // Column-width cache for fixed-columns layout.
-    // Invalidated when data content changes (appendData/replaceData).
-    // Sort and filter reuse the cache since they don't change cell content.
     this._columnWidthsCache = null;
     this._columnWidthsDirty = true;
     this._fixedLayoutSyncTimer = null;
+    this._columnWidthsAppliedThisRender = false;
+    this._hasRenderedHeader = false;
+    this._rowRegistry = null;
+    this._groupHeaderRegistry = null;
+    this._headerSummaryRegistry = null;
+    this._rowRegistrySnapshot = null;
 
     // Initialize the widget
     this.init();
@@ -159,6 +159,28 @@ class DivTable {
   _getGridSize(composite) {
     const responsive = composite.columns[0].responsive || {};
     return DivTable.GRID_SIZES[responsive.size] || '1fr';
+  }
+
+  _buildScrollGridTemplate(columnWidths) {
+    return columnWidths.map(w => `${w}px`).join(' ');
+  }
+
+  /**
+   * The measured scroll-column widths, if any measurement has happened yet.
+   * Used at element-creation time so rows/headers are born with their final
+   * template instead of the responsive default.
+   */
+  _getKnownScrollWidths(scrollColumns) {
+    const cache = this._columnWidthsCache;
+    return cache && cache.length === scrollColumns.length ? cache : null;
+  }
+
+  /**
+   * Bootstrap template for the fixed-columns SCROLL section, used only on the
+   * very first render — before any cell exists there is nothing to measure.
+   */
+  _buildBootstrapScrollTemplate(scrollColumns) {
+    return scrollColumns.map(() => 'max-content').join(' ');
   }
 
   _buildDataMap() {
@@ -391,8 +413,6 @@ class DivTable {
   setupFixedColumnsScrollSync() {
     let isSyncingScroll = false;
 
-    // Sync vertical scroll between fixed body and scrollable body
-    // Sync horizontal scroll between scrollable body and header
     this.scrollBodyContainer.addEventListener('scroll', () => {
       if (isSyncingScroll) return;
       isSyncingScroll = true;
@@ -673,8 +693,6 @@ class DivTable {
       this.toolbar.appendChild(queryContainer);
     }
 
-
-    // Create info section if it doesn't exist
     let infoSection = this.toolbar.querySelector('.info-section');
     if (!infoSection) {
       infoSection = document.createElement('div');
@@ -1173,9 +1191,6 @@ class DivTable {
 
     this.focusElementWithVisibleIndicator(focusableElement);
 
-    // Some browsers can temporarily move focus during the click sequence
-    // (especially on first interaction after page init). Re-assert checkbox
-    // focus at the end of the current event loop tick.
     if (this.showCheckboxes) {
       const checkbox = targetRow.querySelector('input[type="checkbox"]');
       if (checkbox && checkbox !== document.activeElement) {
@@ -1299,6 +1314,8 @@ class DivTable {
       
       // Store the group key to restore focus after render
       const groupToRefocus = { key: groupKey };
+      // Re-measure column widths since new rows are now visible
+      this._columnWidthsDirty = true;
       this.render();
       
       // Restore focus to the same group header
@@ -1315,6 +1332,8 @@ class DivTable {
       
       // Store the group key to restore focus after render
       const groupToRefocus = { key: groupKey };
+      // Re-measure column widths since rows are now hidden
+      this._columnWidthsDirty = true;
       this.render();
       
       // Restore focus to the same group header
@@ -2294,14 +2313,34 @@ class DivTable {
    * instant and INP stays below 200 ms even for 10 000+ rows.
    * Phase 2 (rAF): expensive body rebuild deferred to the next frame so the
    * browser can commit Phase 1 to the screen first.
+   *
+   * @param {{sortOnly?: boolean}} [options] - `sortOnly` means the only state
+   *        that changed is the sort column/direction/mode. Header labels,
+   *        group counts and column widths are all unaffected by that, so the
+   *        header is updated in place rather than rebuilt.
    */
-  _renderDeferred() {
-    // Phase 1 – immediate visual feedback
-    this.renderHeader();
+  _renderDeferred(options = {}) {
+    const sortOnly = !!options.sortOnly;
+
+    if (sortOnly && this._hasRenderedHeader) {
+      this._updateSortIndicatorsInPlace();
+    } else {
+      this.renderHeader();
+
+      if (this.fixedColumns > 0 && this._columnWidthsCache && this.scrollHeaderInner) {
+        const { scrollColumns } = this.splitColumnsForFixedLayout();
+        if (this._columnWidthsCache.length === scrollColumns.length) {
+          this._applyHeaderColumnWidths(this._columnWidthsCache);
+          this._headerWidthsFreshlyApplied = true;
+        }
+      }
+    }
+
     this.updateInfoSection();
 
-    // Phase 2 – deferred body rebuild
-    if (this._renderBodyTimer) cancelAnimationFrame(this._renderBodyTimer);
+    if (this._renderBodyTimer) {
+      cancelAnimationFrame(this._renderBodyTimer);
+    }
     this._renderBodyTimer = requestAnimationFrame(() => {
       this._renderBodyTimer = null;
       this.renderBody();
@@ -2311,6 +2350,10 @@ class DivTable {
   }
 
   renderHeader() {
+    // Header DOM now exists (and carries the data-sort-field markers), so a
+    // subsequent sort-only render can patch its indicators in place.
+    this._hasRenderedHeader = true;
+
     // Handle fixed columns layout
     if (this.fixedColumns > 0) {
       this.renderHeaderWithFixedColumns();
@@ -2386,7 +2429,12 @@ class DivTable {
     this.updateScrollbarSpacer();
   }
 
-  renderHeaderWithFixedColumns() {
+  renderHeaderWithFixedColumns() {    // Header DOM is about to be rebuilt from scratch with default grid sizes,
+    // so any previous Phase-1 width application no longer holds.
+    this._headerWidthsFreshlyApplied = false;
+    // Preserve scroll position before clearing
+    const scrollLeft = this.scrollHeaderContainer?.scrollLeft || 0;
+    
     this.fixedHeaderContainer.innerHTML = '';
     this.scrollHeaderContainer.innerHTML = '';
     
@@ -2404,12 +2452,11 @@ class DivTable {
     
     this.fixedHeaderContainer.style.gridTemplateColumns = fixedGridTemplate.trim();
     
-    // Build grid template for scrollable section - use inner wrapper for scrolling
-    let scrollGridTemplate = '';
-    scrollColumns.forEach(composite => {
-      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
-    });
-    
+    const knownHeaderWidths = this._getKnownScrollWidths(scrollColumns);
+    const scrollGridTemplate = knownHeaderWidths
+      ? this._buildScrollGridTemplate(knownHeaderWidths)
+      : this._buildBootstrapScrollTemplate(scrollColumns);
+
     // Create inner wrapper for scroll header content
     this.scrollHeaderInner = document.createElement('div');
     this.scrollHeaderInner.className = 'div-table-scroll-header-inner';
@@ -2455,6 +2502,13 @@ class DivTable {
     
     // Synchronize header heights
     this.syncFixedColumnsHeaderHeights();
+    
+    // Restore scroll position after header structure is rebuilt
+    if (scrollLeft > 0) {
+      requestAnimationFrame(() => {
+        this.scrollHeaderContainer.scrollLeft = scrollLeft;
+      });
+    }
   }
   
   syncFixedColumnsHeaderHeights() {
@@ -2480,21 +2534,31 @@ class DivTable {
   syncFixedColumnsRowHeights() {
     if (!this.fixedColumns || this.fixedColumns <= 0) return;
     if (!this.fixedBodyContainer || !this.scrollBodyContainer) return;
-    
+
     const fixedRows = this.fixedBodyContainer.querySelectorAll('.div-table-row');
     const scrollRows = this.scrollBodyContainer.querySelectorAll('.div-table-row');
-    
+
     if (fixedRows.length !== scrollRows.length) return;
 
-    // --- Reset phase: clear all explicit heights so we measure natural sizes ---
-    fixedRows.forEach((fixedRow, i) => {
-      fixedRow.style.height = '';
-      scrollRows[i].style.height = '';
-    });
+    const pending = [];
+    for (let i = 0; i < fixedRows.length; i++) {
+      if (!fixedRows[i].dataset.heightSynced || !scrollRows[i].dataset.heightSynced) {
+        pending.push(i);
+      }
+    }
+    if (pending.length === 0) return;
 
-    // --- Read phase: measure all natural heights ---
-    const heights = [];
-    fixedRows.forEach((fixedRow, i) => {
+    // --- Reset phase: clear explicit heights so natural sizes can be measured ---
+    for (const i of pending) {
+      fixedRows[i].style.height = '';
+      scrollRows[i].style.height = '';
+    }
+
+    // --- Read phase: measure natural heights (batched after all resets so
+    // layout is recalculated once, not once per row) ---
+    const heights = new Map();
+    for (const i of pending) {
+      const fixedRow = fixedRows[i];
       const scrollRow = scrollRows[i];
       const fixedHeight = Math.max(fixedRow.offsetHeight, fixedRow.scrollHeight);
       const scrollHeight = Math.max(scrollRow.offsetHeight, scrollRow.scrollHeight);
@@ -2507,72 +2571,94 @@ class DivTable {
         maxCellHeight = Math.max(maxCellHeight, cell.offsetHeight, cell.scrollHeight);
       });
 
-      heights.push(Math.max(fixedHeight, scrollHeight, maxCellHeight));
-    });
+      heights.set(i, Math.max(fixedHeight, scrollHeight, maxCellHeight));
+    }
 
-    // --- Write phase: apply all heights ---
-    fixedRows.forEach((fixedRow, i) => {
-      if (heights[i] > 0) {
-        fixedRow.style.height = `${heights[i]}px`;
-        scrollRows[i].style.height = `${heights[i]}px`;
+    // --- Write phase: apply heights ---
+    for (const i of pending) {
+      const h = heights.get(i);
+      if (h > 0) {
+        const px = `${h}px`;
+        fixedRows[i].style.height = px;
+        scrollRows[i].style.height = px;
+        fixedRows[i].dataset.heightSynced = '1';
+        scrollRows[i].dataset.heightSynced = '1';
       }
-    });
+    }
   }
   
+  _selectRowsForWidthMeasurement(maxSampleRows = 100) {
+    const rows = Array.from(
+      this.scrollBodyContainer.querySelectorAll('.div-table-row:not(.group-header):not(.summary-row)')
+    );
+    if (rows.length <= maxSampleRows) return rows;
+
+    const byId = rows.slice().sort((a, b) =>
+      String(a.dataset.id ?? '').localeCompare(String(b.dataset.id ?? ''))
+    );
+
+    const step = Math.floor(byId.length / maxSampleRows) || 1;
+    const sampled = [];
+    for (let i = 0; i < byId.length && sampled.length < maxSampleRows; i += step) {
+      sampled.push(byId[i]);
+    }
+    return sampled;
+  }
+
+  _measureColumnWidths(numColumns, floorWidths = null) {
+    const headerCells = Array.from(this.scrollHeaderInner.querySelectorAll('.div-table-header-cell'));
+    const sampledRows = this._selectRowsForWidthMeasurement();
+
+    const widths = [];
+    for (let colIndex = 0; colIndex < numColumns; colIndex++) {
+      // Header width is the baseline — an empty column never shrinks below its title.
+      let maxWidth = headerCells[colIndex]
+        ? this._measureCellContentWidth(headerCells[colIndex])
+        : 0;
+
+      // Never shrink below what was already measured/applied.
+      if (floorWidths && floorWidths[colIndex]) {
+        maxWidth = Math.max(maxWidth, floorWidths[colIndex] - 4);
+      }
+
+      for (const row of sampledRows) {
+        const cells = row.querySelectorAll('.div-table-cell');
+        if (cells[colIndex]) {
+          maxWidth = Math.max(maxWidth, this._measureCellContentWidth(cells[colIndex]));
+        }
+      }
+
+      widths.push(maxWidth + 4);
+    }
+    return widths;
+  }
+
   syncFixedColumnsColumnWidths() {
     if (!this.fixedColumns || this.fixedColumns <= 0) return;
     if (!this.scrollHeaderInner || !this.scrollBodyContainer) return;
-
     const { scrollColumns } = this.splitColumnsForFixedLayout();
     const numColumns = scrollColumns.length;
     if (numColumns === 0) return;
 
+    const cacheUsable = this._columnWidthsCache && this._columnWidthsCache.length === numColumns;
+
     let columnWidths;
 
-    if (!this._columnWidthsDirty && this._columnWidthsCache && this._columnWidthsCache.length === numColumns) {
-      // Reuse cached widths — sort and filter don't change cell content
+    if (!this._columnWidthsDirty && cacheUsable) {
+      // Nothing invalidated the measurement — sort and filter never change cell
+      // content, so the cached widths are still exact.
       columnWidths = this._columnWidthsCache;
+
+      // Widths were already written to every row earlier this render cycle.
+      // This call is then a late post-populate sync fired by the
+      // IntersectionObserver, and re-writing identical values to the whole
+      // body would be pure waste.
+      if (this._columnWidthsAppliedThisRender) return;
     } else {
-      // Measure column widths.
-      // Sample at most MAX_SAMPLE_ROWS data rows: real datasets have high width
-      // variance in the first rows; measuring every row for 1000+ records causes
-      // a multi-second long task that blocks paint (poor INP).
-      const MAX_SAMPLE_ROWS = 100;
-      const headerCells = Array.from(this.scrollHeaderInner.querySelectorAll('.div-table-header-cell'));
-      const allBodyRows = this.scrollBodyContainer.querySelectorAll('.div-table-row:not(.group-header)');
-      const totalRows = allBodyRows.length;
-
-      // Build a sampled subset: always include first/last rows plus evenly-spaced strides
-      let sampledRows;
-      if (totalRows <= MAX_SAMPLE_ROWS) {
-        sampledRows = Array.from(allBodyRows);
-      } else {
-        const step = Math.floor(totalRows / MAX_SAMPLE_ROWS);
-        sampledRows = [];
-        for (let i = 0; i < totalRows; i += step) {
-          sampledRows.push(allBodyRows[i]);
-          if (sampledRows.length >= MAX_SAMPLE_ROWS) break;
-        }
-      }
-
-      columnWidths = [];
-      for (let colIndex = 0; colIndex < numColumns; colIndex++) {
-        let maxWidth = 0;
-
-        if (headerCells[colIndex]) {
-          maxWidth = Math.max(maxWidth, this._measureCellContentWidth(headerCells[colIndex]));
-        }
-
-        for (const row of sampledRows) {
-          const cells = row.querySelectorAll('.div-table-cell');
-          if (cells[colIndex]) {
-            maxWidth = Math.max(maxWidth, this._measureCellContentWidth(cells[colIndex]));
-          }
-        }
-
-        columnWidths.push(maxWidth + 4);
-      }
-
+      // Re-measure. The previous cache is always the floor, whether this is an
+      // explicit 'expand-only' pass or a full recalculation, so widths only
+      // ever grow and never flicker back and forth.
+      columnWidths = this._measureColumnWidths(numColumns, cacheUsable ? this._columnWidthsCache : null);
       this._columnWidthsCache = columnWidths;
       this._columnWidthsDirty = false;
     }
@@ -2580,29 +2666,68 @@ class DivTable {
     this._applyColumnWidths(columnWidths);
   }
 
+  _applyHeaderColumnWidths(columnWidths) {
+    if (!this.scrollHeaderInner) return;
+    const scrollGridTemplate = this._buildScrollGridTemplate(columnWidths);
+    if (this.scrollHeaderInner.style.gridTemplateColumns !== scrollGridTemplate) {
+      this.scrollHeaderInner.style.gridTemplateColumns = scrollGridTemplate;
+    }
+  }
+
   /**
-   * Apply pre-computed column widths to the scroll header and all scroll body rows.
-   * Pure write phase — no layout reads, safe to call without forcing reflow.
+   * Apply pre-computed column widths to both fixed and scroll sections.
+   * Scroll columns use exact measured pixels; fixed columns use their
+   * configured grid sizes.
    */
-  _applyColumnWidths(columnWidths) {
+  _applyColumnWidths(columnWidths, options = {}) {
     if (!this.scrollHeaderInner || !this.scrollBodyContainer) return;
-    const gridTemplate = columnWidths.map(w => `${w}px`).join(' ');
-    const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+    const skipHeader = !!options.skipHeader;
+    this._columnWidthsAppliedThisRender = true;
 
-    this.scrollHeaderInner.style.gridTemplateColumns = gridTemplate;
+    const scrollGridTemplate = this._buildScrollGridTemplate(columnWidths);
+    const totalScrollWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+    const totalScrollWidthPx = `${totalScrollWidth}px`;
 
-    const allRows = this.scrollBodyContainer.querySelectorAll('.div-table-row');
-    allRows.forEach(row => {
+    const setStyle = (el, prop, value) => {
+      if (el.style[prop] !== value) el.style[prop] = value;
+    };
+
+    // Apply to scroll header — skipped when Phase 1 (_renderDeferred) already
+    // wrote this exact value to avoid a redundant duplicate DOM write.
+    if (!skipHeader) {
+      setStyle(this.scrollHeaderInner, 'gridTemplateColumns', scrollGridTemplate);
+    }
+
+    // Apply to scroll body rows
+    const allScrollRows = this.scrollBodyContainer.querySelectorAll('.div-table-row');
+    allScrollRows.forEach(row => {
       if (row.classList.contains('group-header')) {
-        row.style.gridTemplateColumns = '1fr';
-        row.style.minWidth = `${totalWidth}px`;
+        setStyle(row, 'gridTemplateColumns', '100%');
+        setStyle(row, 'minWidth', totalScrollWidthPx);
       } else if (row.classList.contains('summary-row')) {
-        row.style.gridTemplateColumns = gridTemplate;
-        row.style.minWidth = `${totalWidth}px`;
+        setStyle(row, 'gridTemplateColumns', scrollGridTemplate);
+        setStyle(row, 'minWidth', totalScrollWidthPx);
       } else {
-        row.style.gridTemplateColumns = gridTemplate;
+        setStyle(row, 'gridTemplateColumns', scrollGridTemplate);
       }
     });
+
+    // Apply to fixed section (if present)
+    if (this.fixedColumns > 0 && this.fixedHeaderContainer && this.fixedBodyContainer) {
+      const { fixedColumns } = this.splitColumnsForFixedLayout();
+
+      // Build fixed grid using default sizes from getColumnGridSize
+      let fixedGridTemplate = '';
+      if (this.showCheckboxes) {
+        fixedGridTemplate = '40px ';
+      }
+      for (const composite of fixedColumns) {
+        fixedGridTemplate += this.getColumnGridSize(composite, true) + ' ';
+      }
+      fixedGridTemplate = fixedGridTemplate.trim();
+
+      this.fixedHeaderContainer.style.gridTemplateColumns = fixedGridTemplate;
+    }
 
     this.updateFixedColumnsShadow();
   }
@@ -2670,6 +2795,66 @@ class DivTable {
         return 'minmax(120px, 280px)';
       default:
         return 'minmax(100px, 200px)';
+    }
+  }
+
+  /**
+   * Apply the current sort state to a single sort-indicator element.
+   *
+   * This is the one place that knows how sort state maps to indicator glyphs
+   * and `sorted`/direction classes — every header variant (plain column,
+   * composite sub-header, legacy subLabel/subField) routes through it, and so
+   * does the in-place update path used when only the sort changed.
+   *
+   * @param {HTMLElement} indicator - the .sort-indicator / .sub-sort-indicator span
+   * @param {string} field - the column field this indicator sorts by
+   * @param {HTMLElement|null} hostEl - element that carries the `sorted` class, if any
+   * @param {'rich'|'plain'} style - 'rich' additionally shows A/Z and 1/9 glyphs
+   *        when the indicator's column is also the grouped column
+   */
+  _applySortIndicatorState(indicator, field, hostEl = null, style = 'plain') {
+    indicator.dataset.sortField = field ?? '';
+    indicator.dataset.sortStyle = style;
+    if (hostEl) hostEl.dataset.sortHostFor = field ?? '';
+
+    const isActive = field != null && this.sortColumn === field;
+    indicator.classList.toggle('active', isActive);
+
+    if (isActive) {
+      const isGroupedField = style === 'rich' && this.groupByField && field === this.groupByField;
+      if (isGroupedField && this.sortMode === 'count') {
+        indicator.textContent = this.sortDirection === 'asc' ? '↑1' : '↓9';
+      } else if (isGroupedField && this.sortMode === 'value') {
+        indicator.textContent = this.sortDirection === 'asc' ? '↑A' : '↓Z';
+      } else {
+        indicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
+      }
+    } else {
+      indicator.textContent = '⇅';
+    }
+
+    if (hostEl) {
+      hostEl.classList.remove('sorted', 'asc', 'desc');
+      if (isActive) hostEl.classList.add('sorted', this.sortDirection);
+    }
+  }
+
+  /**
+   * Refresh sort arrows on the EXISTING header DOM instead of rebuilding it.
+   */
+  _updateSortIndicatorsInPlace() {
+    const roots = this.fixedColumns > 0
+      ? [this.fixedHeaderContainer, this.scrollHeaderInner]
+      : [this.headerContainer];
+
+    for (const root of roots) {
+      if (!root) continue;
+      root.querySelectorAll('[data-sort-field]').forEach(indicator => {
+        const field = indicator.dataset.sortField || null;
+        const style = indicator.dataset.sortStyle === 'rich' ? 'rich' : 'plain';
+        const hostEl = indicator.closest('[data-sort-host-for]');
+        this._applySortIndicatorState(indicator, field, hostEl, style);
+      });
     }
   }
 
@@ -2775,14 +2960,8 @@ class DivTable {
       // Add sort indicator placeholder
       const sortIndicator = document.createElement('span');
       sortIndicator.className = 'sort-indicator';
-      
-      if (this.sortColumn === col.field) {
-        sortIndicator.classList.add('active');
-        sortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
-      } else {
-        sortIndicator.textContent = '⇅';
-      }
-      
+      this._applySortIndicatorState(sortIndicator, col.field, null, 'plain');
+
       rightContent.appendChild(sortIndicator);
       mainLabelContainer.appendChild(rightContent);
       headerCell.appendChild(mainLabelContainer);
@@ -2808,14 +2987,8 @@ class DivTable {
       if (col.subField) {
         const subSortIndicator = document.createElement('span');
         subSortIndicator.className = 'sub-sort-indicator';
-        
-        if (this.sortColumn === col.subField) {
-          subSortIndicator.classList.add('active');
-          subSortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
-        } else {
-          subSortIndicator.textContent = '⇅';
-        }
-        
+        this._applySortIndicatorState(subSortIndicator, col.subField, null, 'plain');
+
         subLabelContainer.appendChild(subSortIndicator);
         
         // Add hover effect - use CSS variable for theming support
@@ -2951,29 +3124,8 @@ class DivTable {
     // Add sort indicator
     const sortIndicator = document.createElement('span');
     sortIndicator.className = 'sort-indicator';
-    
-    if (this.sortColumn === col.field) {
-      sortIndicator.classList.add('active');
-      
-      // Check if this is a grouped field to show special indicators
-      const isGroupedField = this.groupByField && col.field === this.groupByField;
-      
-      if (isGroupedField && this.sortMode === 'count') {
-        // Count-based sorting: show 1 or 9
-        sortIndicator.textContent = this.sortDirection === 'asc' ? '↑1' : '↓9';
-      } else if (isGroupedField && this.sortMode === 'value') {
-        // Value-based sorting on grouped field: show a or z
-        sortIndicator.textContent = this.sortDirection === 'asc' ? '↑A' : '↓Z';
-      } else {
-        // Regular sorting: standard arrows
-        sortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
-      }
-      
-      headerCell.classList.add('sorted', this.sortDirection);
-    } else {
-      sortIndicator.textContent = '⇅';
-    }
-    
+    this._applySortIndicatorState(sortIndicator, col.field, headerCell, 'rich');
+
     rightContent.appendChild(sortIndicator);
     headerCell.appendChild(rightContent);
 
@@ -3106,26 +3258,8 @@ class DivTable {
       // Add sort indicator
       const sortIndicator = document.createElement('span');
       sortIndicator.className = 'sort-indicator';
-      
-      if (this.sortColumn === col.field) {
-        sortIndicator.classList.add('active');
-        
-        // Check if this is a grouped field to show special indicators
-        const isGroupedField = this.groupByField && col.field === this.groupByField;
-        
-        if (isGroupedField && this.sortMode === 'count') {
-          sortIndicator.textContent = this.sortDirection === 'asc' ? '↑1' : '↓9';
-        } else if (isGroupedField && this.sortMode === 'value') {
-          sortIndicator.textContent = this.sortDirection === 'asc' ? '↑A' : '↓Z';
-        } else {
-          sortIndicator.textContent = this.sortDirection === 'asc' ? '↑' : '↓';
-        }
-        
-        subHeader.classList.add('sorted', this.sortDirection);
-      } else {
-        sortIndicator.textContent = '⇅';
-      }
-      
+      this._applySortIndicatorState(sortIndicator, col.field, subHeader, 'rich');
+
       rightContent.appendChild(sortIndicator);
       subHeader.appendChild(rightContent);
       
@@ -3145,21 +3279,23 @@ class DivTable {
   }
 
   renderBody() {
-    // Disconnect lazy rendering observer before clearing content
-    if (this.rowObserver) {
-      this.rowObserver.disconnect();
-    }
-    
-    // Invalidate per-render caches
-    this._cachedGridTemplate = null;
-    this._cachedCompositeColumns = null;
-    
-    // Handle fixed columns layout
+    // Handle fixed columns layout. That path manages the lazy-render observer
+    // itself, because a pure-sort reorder reuses the existing (still live)
+    // row elements and must leave their observer connected.
     if (this.fixedColumns > 0) {
       this.renderBodyWithFixedColumns();
       return;
     }
-    
+
+    // Disconnect lazy rendering observer before clearing content
+    if (this.rowObserver) {
+      this.rowObserver.disconnect();
+    }
+
+    // Invalidate per-render caches
+    this._cachedGridTemplate = null;
+    this._cachedCompositeColumns = null;
+
     this.bodyContainer.innerHTML = '';
 
     // Show loading placeholders if in loading state
@@ -3217,27 +3353,23 @@ class DivTable {
     // Preserve horizontal scroll position before clearing
     const scrollLeft = this.scrollBodyContainer?.scrollLeft || 0;
 
-    this.fixedBodyContainer.innerHTML = '';
-    this.scrollBodyContainer.innerHTML = '';
-    // Invalidate per-render row grid template caches
-    this._cachedFixedRowGridTemplate = null;
-    this._cachedScrollRowGridTemplate = null;
-    this._cachedFixedColumns = null;
-    this._cachedScrollColumns = null;
-
     // Show loading placeholders if in loading state
     if (this.isLoadingState) {
+      if (this.rowObserver) this.rowObserver.disconnect();
+      this.fixedBodyContainer.innerHTML = '';
+      this.scrollBodyContainer.innerHTML = '';
+      this._invalidateRowRegistry();
       this.showLoadingPlaceholders();
       return;
     }
 
     // Apply selection filter on top of existing filters
     let dataToRender = this.filteredData;
-    
+
     if (this.showOnlySelected && this.selectedRows.size === 0) {
       this.showOnlySelected = false;
     }
-    
+
     if (this.showOnlySelected && this.selectedRows.size > 0) {
       dataToRender = this.filteredData.filter(item => {
         const itemId = String(item[this.primaryKeyField]);
@@ -3246,9 +3378,13 @@ class DivTable {
     }
 
     if (dataToRender.length === 0) {
+      if (this.rowObserver) this.rowObserver.disconnect();
+      this.fixedBodyContainer.innerHTML = '';
+      this.scrollBodyContainer.innerHTML = '';
+      this._invalidateRowRegistry();
       const emptyState = document.createElement('div');
       emptyState.className = 'div-table-empty';
-      emptyState.textContent = this.showOnlySelected && this.selectedRows.size > 0 
+      emptyState.textContent = this.showOnlySelected && this.selectedRows.size > 0
         ? 'No selected rows match current filters'
         : 'No data to display';
       // Span empty state across both sections
@@ -3256,20 +3392,83 @@ class DivTable {
       return;
     }
 
+    // Fast path: when the only thing that changed since the last full render
+    // is row ORDER (a pure sort — same rows, same grouping/collapse/selection
+    // visibility, same columns), move the existing row and group-header
+    // elements into their new positions instead of destroying and recreating
+    // them. appendChild() on an already-attached node relocates it, so cell
+    // content, populated state, column widths, row heights and
+    // selection/focus classes all survive untouched — nothing needs to be
+    // re-created and no style has to be written again.
+    if (this._canReorderBody(dataToRender)) {
+      this._reorderBodyWithFixedColumns(dataToRender);
+      if (scrollLeft > 0) this.scrollBodyContainer.scrollLeft = scrollLeft;
+      return;
+    }
+    const prevRowHeights = new Map();
+    if (this._rowRegistry) {
+      for (const [id, entry] of this._rowRegistry) {
+        const h = entry.scrollRow?.style?.height;
+        if (h) prevRowHeights.set(id, h);
+      }
+    }
+
+    if (this.rowObserver) this.rowObserver.disconnect();
+    this.fixedBodyContainer.innerHTML = '';
+    this.scrollBodyContainer.innerHTML = '';
+    // Invalidate per-render row grid template caches
+    this._cachedFixedRowGridTemplate = null;
+    this._cachedScrollRowGridTemplate = null;
+    this._cachedFixedColumns = null;
+    this._cachedScrollColumns = null;
+    // Fresh body rebuild — nothing has been column-width-applied yet this cycle.
+    this._columnWidthsAppliedThisRender = false;
+    // Fresh registries — repopulated by the row/group-header creation below.
+    this._rowRegistry = new Map();
+    this._groupHeaderRegistry = new Map();
+    this._headerSummaryRegistry = null;
+
+    if (!this._getKnownScrollWidths(this.splitColumnsForFixedLayout().scrollColumns) && this.scrollHeaderInner) {
+      const { scrollColumns: sc } = this.splitColumnsForFixedLayout();
+      const headerCells = Array.from(this.scrollHeaderInner.querySelectorAll('.div-table-header-cell'));
+      if (headerCells.length === sc.length && sc.length > 0) {
+        this._columnWidthsCache = headerCells.map(cell => this._measureCellContentWidth(cell) + 4);
+        // Still needs a real measurement against row content once rows exist.
+        this._columnWidthsDirty = true;
+      }
+    }
+
     if (this.groupByField) {
       this.renderGroupedRowsWithFixedColumns(dataToRender);
     } else {
       this.renderRegularRowsWithFixedColumns(dataToRender);
     }
-    
+
+    if (prevRowHeights.size > 0) {
+      for (const [id, entry] of this._rowRegistry) {
+        const h = prevRowHeights.get(id);
+        if (h) {
+          entry.fixedRow.style.height = h;
+          entry.scrollRow.style.height = h;
+          entry.fixedRow.dataset.heightSynced = '1';
+          entry.scrollRow.dataset.heightSynced = '1';
+        }
+      }
+    }
+
     // Add header summary row if enabled and has aggregate columns
     if (this.showHeaderSummary && this.hasAggregateColumns()) {
       const { fixedSummary, scrollSummary } = this.createHeaderSummaryRowWithFixedColumns(dataToRender);
       // Insert at the beginning of body containers (after header)
       this.fixedBodyContainer.insertBefore(fixedSummary, this.fixedBodyContainer.firstChild);
       this.scrollBodyContainer.insertBefore(scrollSummary, this.scrollBodyContainer.firstChild);
+      this._headerSummaryRegistry = { fixedSummary, scrollSummary };
     }
-    
+
+    // Record the state this registry corresponds to, so a later render can
+    // tell whether reordering it is still valid.
+    this._captureRowRegistrySnapshot();
+
     // Populate visible rows synchronously so first paint shows real content.
     if (this.lazyCellRendering) {
       this._populateVisibleRowsEagerly();
@@ -3281,16 +3480,42 @@ class DivTable {
       this.setupLazyRenderingObserver();
     }
 
-    // Apply column widths to the DOM without blocking paint:
-    // • If we have a valid cache, apply it NOW (pure write, no measurement) so
-    //   the first painted frame already has correct widths.
-    // • Schedule a post-paint rAF to (re-)measure when the cache is stale.
-    //   This keeps INP fast: the browser can commit a frame before any
-    //   expensive layout reads happen.
-    if (!this._columnWidthsDirty && this._columnWidthsCache) {
-      this._applyColumnWidths(this._columnWidthsCache);
+    if (this._columnWidthsCache && !this._columnWidthsDirty) {
+      // Cache valid + clean: apply widths AND sync row heights synchronously.
+      // Column widths won't change in rAF, so skip rAF entirely — eliminates two-phase flicker.
+      this._applyColumnWidths(this._columnWidthsCache, { skipHeader: this._headerWidthsFreshlyApplied });
+      this._headerWidthsFreshlyApplied = false;
+      this.syncFixedColumnsRowHeights();
+      // Cancel any stale rAF (may have been scheduled by a prior render)
+      if (this._fixedLayoutSyncTimer) {
+        cancelAnimationFrame(this._fixedLayoutSyncTimer);
+        this._fixedLayoutSyncTimer = null;
+      }
+    } else if (this._columnWidthsCache) {
+      // Cache exists but dirty (expand-only or full recalc pending): apply cache as baseline,
+      // then rAF will re-measure and may widen columns further.
+      this._applyColumnWidths(this._columnWidthsCache, { skipHeader: this._headerWidthsFreshlyApplied });
+      this._headerWidthsFreshlyApplied = false;
+      this.syncFixedColumnsRowHeights();
+      this._scheduleFixedColumnsLayoutSync();
+    } else {
+      // No cache yet (initial render): measure header cells synchronously as a
+      // baseline so first paint already has correct-ish column widths.
+      // rAF will re-measure including row data and may widen columns further.
+      const { scrollColumns: sc } = this.splitColumnsForFixedLayout();
+      const headerCells = Array.from(this.scrollHeaderInner?.querySelectorAll('.div-table-header-cell') ?? []);
+      if (headerCells.length === sc.length) {
+        const headerWidths = headerCells.map(cell => this._measureCellContentWidth(cell) + 4);
+        // Seed the cache so rows created from here on are born with pixel
+        // widths rather than the responsive 1fr/3fr default.
+        this._columnWidthsCache = headerWidths;
+        this._applyColumnWidths(headerWidths);
+      }
+      // Heights synced pre-paint here too — same reasoning as the dirty
+      // branch above.
+      this.syncFixedColumnsRowHeights();
+      this._scheduleFixedColumnsLayoutSync();
     }
-    this._scheduleFixedColumnsLayoutSync();
     
     // Restore horizontal scroll position after rendering
     if (scrollLeft > 0) {
@@ -3305,66 +3530,168 @@ class DivTable {
     });
   }
 
+  /**
+   * Order groups by the grouped column's value or item count, when that
+   * column is also the active sort column. Shared by every grouped render
+   * path (fixed-columns rebuild, plain rebuild, reorder fast path) so the
+   * comparator exists in exactly one place.
+   */
+  _sortGroupsByField(groups) {
+    if (this.sortColumn !== this.groupByField) return groups;
+    return groups.sort((a, b) => {
+      if (this.sortMode === 'count') {
+        const countDiff = a.items.length - b.items.length;
+        return this.sortDirection === 'desc' ? -countDiff : countDiff;
+      }
+      if (a.value == null && b.value == null) return 0;
+      if (a.value == null) return this.sortDirection === 'asc' ? -1 : 1;
+      if (b.value == null) return this.sortDirection === 'asc' ? 1 : -1;
+
+      let result = 0;
+      if (typeof a.value === 'number' && typeof b.value === 'number') {
+        result = a.value - b.value;
+      } else {
+        result = String(a.value).localeCompare(String(b.value));
+      }
+      return this.sortDirection === 'desc' ? -result : result;
+    });
+  }
+
+  /** Drop the row registry — the next render must rebuild rather than reorder. */
+  _invalidateRowRegistry() {
+    this._rowRegistry = null;
+    this._groupHeaderRegistry = null;
+    this._headerSummaryRegistry = null;
+    this._rowRegistrySnapshot = null;
+  }
+
+  /** Identity signature of the current fixed/scroll column split. */
+  _computeColumnsSignature(fixedColumns, scrollColumns) {
+    const sig = cols => cols.map(c => c.columns.map(col => col.field).join('+')).join('|');
+    return sig(fixedColumns) + '::' + sig(scrollColumns);
+  }
+
+  /** Record the state the freshly built registry corresponds to. */
+  _captureRowRegistrySnapshot() {
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    this._rowRegistrySnapshot = {
+      groupByField: this.groupByField,
+      showOnlySelected: this.showOnlySelected,
+      hasSummary: this.showHeaderSummary && this.hasAggregateColumns(),
+      collapsedKey: [...this.collapsedGroups].sort().join(','),
+      columnsSignature: this._computeColumnsSignature(fixedColumns, scrollColumns),
+    };
+  }
+
+  /**
+   * True when only row order can have changed since the registry was built —
+   * same row set, same grouping/collapse/selection-visibility, same columns.
+   * Comparing the actual row-id set means data and filter changes are caught
+   * regardless of which API triggered them, so no dirty flag can be missed.
+   */
+  _canReorderBody(dataToRender) {
+    if (!this._rowRegistry || !this._rowRegistrySnapshot) return false;
+
+    const snap = this._rowRegistrySnapshot;
+    if (snap.groupByField !== this.groupByField) return false;
+    if (snap.showOnlySelected !== this.showOnlySelected) return false;
+    if (snap.hasSummary !== (this.showHeaderSummary && this.hasAggregateColumns())) return false;
+    if (snap.collapsedKey !== [...this.collapsedGroups].sort().join(',')) return false;
+
+    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    if (snap.columnsSignature !== this._computeColumnsSignature(fixedColumns, scrollColumns)) return false;
+
+    if (dataToRender.length !== this._rowRegistry.size) return false;
+    for (const item of dataToRender) {
+      if (!this._rowRegistry.has(String(item[this.primaryKeyField]))) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Move the existing row and group-header elements into the current sort
+   * order. appendChild() relocates an already-attached node, so no element is
+   * created, destroyed, or restyled here.
+   */
+  _reorderBodyWithFixedColumns(dataToRender) {
+    const placeRow = item => {
+      const entry = this._rowRegistry.get(String(item[this.primaryKeyField]));
+      if (!entry) return;
+      this.fixedBodyContainer.appendChild(entry.fixedRow);
+      this.scrollBodyContainer.appendChild(entry.scrollRow);
+    };
+
+    if (this.groupByField) {
+      const groups = this._sortGroupsByField(this.groupData(dataToRender));
+      groups.forEach(group => {
+        const header = this._groupHeaderRegistry.get(group.key);
+        if (header) {
+          this.fixedBodyContainer.appendChild(header.fixedGroupHeader);
+          this.scrollBodyContainer.appendChild(header.scrollGroupHeader);
+        }
+        if (!this.collapsedGroups.has(group.key)) {
+          const items = this.sortColumn === this.groupByField
+            ? group.items
+            : this.sortData(group.items);
+          items.forEach(placeRow);
+        }
+      });
+    } else {
+      this.sortData(dataToRender).forEach(placeRow);
+    }
+
+    // The appends above would otherwise leave the pinned grand-total row at
+    // the bottom — put it back on top.
+    if (this._headerSummaryRegistry) {
+      const { fixedSummary, scrollSummary } = this._headerSummaryRegistry;
+      this.fixedBodyContainer.insertBefore(fixedSummary, this.fixedBodyContainer.firstChild);
+      this.scrollBodyContainer.insertBefore(scrollSummary, this.scrollBodyContainer.firstChild);
+    }
+
+    // DOM order changed, so keyboard tab order has to follow it.
+    this._scheduleTabIndexUpdate();
+  }
+
   renderRegularRowsWithFixedColumns(dataToRender = this.filteredData) {
     const sortedData = this.sortData(dataToRender);
     const fixedFragment = document.createDocumentFragment();
     const scrollFragment = document.createDocumentFragment();
-    
+
     sortedData.forEach(item => {
       const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
       fixedFragment.appendChild(fixedRow);
       scrollFragment.appendChild(scrollRow);
+      this._rowRegistry.set(String(item[this.primaryKeyField]), { fixedRow, scrollRow });
     });
-    
+
     this.fixedBodyContainer.appendChild(fixedFragment);
     this.scrollBodyContainer.appendChild(scrollFragment);
   }
 
   renderGroupedRowsWithFixedColumns(dataToRender = this.filteredData) {
-    let groups = this.groupData(dataToRender);
-    
-    // If sorting by the grouped column, sort the groups themselves
-    if (this.sortColumn === this.groupByField) {
-      groups = groups.sort((a, b) => {
-        if (this.sortMode === 'count') {
-          const countDiff = a.items.length - b.items.length;
-          return this.sortDirection === 'desc' ? -countDiff : countDiff;
-        } else {
-          if (a.value == null && b.value == null) return 0;
-          if (a.value == null) return this.sortDirection === 'asc' ? -1 : 1;
-          if (b.value == null) return this.sortDirection === 'asc' ? 1 : -1;
-          
-          let result = 0;
-          if (typeof a.value === 'number' && typeof b.value === 'number') {
-            result = a.value - b.value;
-          } else {
-            result = String(a.value).localeCompare(String(b.value));
-          }
-          
-          return this.sortDirection === 'desc' ? -result : result;
-        }
-      });
-    }
-    
+    const groups = this._sortGroupsByField(this.groupData(dataToRender));
+
     const fixedFragment = document.createDocumentFragment();
     const scrollFragment = document.createDocumentFragment();
-    
+
     groups.forEach(group => {
       if (this.sortColumn !== this.groupByField) {
         group.items = this.sortData(group.items);
       }
-      
+
       // Group header spans both sections
       const { fixedGroupHeader, scrollGroupHeader } = this.createGroupHeaderWithFixedColumns(group);
       fixedFragment.appendChild(fixedGroupHeader);
       scrollFragment.appendChild(scrollGroupHeader);
-      
+      this._groupHeaderRegistry.set(group.key, { fixedGroupHeader, scrollGroupHeader });
+
       // Group rows (if not collapsed)
       if (!this.collapsedGroups.has(group.key)) {
         group.items.forEach(item => {
           const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
           fixedFragment.appendChild(fixedRow);
           scrollFragment.appendChild(scrollRow);
+          this._rowRegistry.set(String(item[this.primaryKeyField]), { fixedRow, scrollRow });
         });
       }
     });
@@ -3442,11 +3769,6 @@ class DivTable {
       threshold: 0
     });
     
-    // Observe all unpopulated rows
-    // Observe ONLY scroll rows (or body rows for non-fixed layout).
-    // Fixed rows share the same data-id and are reachable via _peer — observing
-    // both halves would double the observer count (20 000 vs 10 000) and the
-    // observer callback already handles population of both sides.
     const rows = this.fixedColumns > 0
       ? this.scrollBodyContainer.querySelectorAll('.div-table-row[data-populated="false"]')
       : this.bodyContainer.querySelectorAll('.div-table-row[data-populated="false"]');
@@ -3463,10 +3785,6 @@ class DivTable {
     const container = this.fixedColumns > 0 ? this.scrollBodyContainer : this.bodyContainer;
     if (!container) return;
 
-    // IMPORTANT: avoid getBoundingClientRect() on N rows — it forces a full
-    // layout recalculation for every row (the primary cause of the 3 s freeze).
-    // Instead use scroll position + clientHeight + estimatedRowHeight to
-    // calculate the visible index window purely with arithmetic.
     const scrollTop   = container.scrollTop;   // cheap, no layout
     const viewH       = container.clientHeight; // cheap when container size is stable
     const rowH        = this.estimatedRowHeight || 40;
@@ -3522,30 +3840,7 @@ class DivTable {
   }
 
   renderGroupedRows(dataToRender = this.filteredData) {
-    let groups = this.groupData(dataToRender);
-    
-    // If sorting by the grouped column, sort the groups themselves
-    if (this.sortColumn === this.groupByField) {
-      groups = groups.sort((a, b) => {
-        if (this.sortMode === 'count') {
-          const countDiff = a.items.length - b.items.length;
-          return this.sortDirection === 'desc' ? -countDiff : countDiff;
-        } else {
-          if (a.value == null && b.value == null) return 0;
-          if (a.value == null) return this.sortDirection === 'asc' ? -1 : 1;
-          if (b.value == null) return this.sortDirection === 'asc' ? 1 : -1;
-          
-          let result = 0;
-          if (typeof a.value === 'number' && typeof b.value === 'number') {
-            result = a.value - b.value;
-          } else {
-            result = String(a.value).localeCompare(String(b.value));
-          }
-          
-          return this.sortDirection === 'desc' ? -result : result;
-        }
-      });
-    }
+    const groups = this._sortGroupsByField(this.groupData(dataToRender));
 
     const fragment = document.createDocumentFragment();
 
@@ -3646,7 +3941,12 @@ class DivTable {
     // Mark as populated
     fixedRow.dataset.populated = 'true';
     scrollRow.dataset.populated = 'true';
-    
+
+    // This pair just gained real content, so its previously synced height is
+    // no longer valid — clear the marker so the next sync re-measures it.
+    delete fixedRow.dataset.heightSynced;
+    delete scrollRow.dataset.heightSynced;
+
     // Queue height sync — batched via single rAF to avoid layout thrashing
     this._schedulePostPopulateSync();
     
@@ -3763,9 +4063,10 @@ class DivTable {
       let fixedTemplate = this.showCheckboxes ? '40px ' : '';
       fixedColumns.forEach(c => { fixedTemplate += this.getColumnGridSize(c, true) + ' '; });
       this._cachedFixedRowGridTemplate = fixedTemplate.trim();
-      let scrollTemplate = '';
-      scrollColumns.forEach(c => { scrollTemplate += this.getColumnGridSize(c) + ' '; });
-      this._cachedScrollRowGridTemplate = scrollTemplate.trim();
+      const knownWidths = this._getKnownScrollWidths(scrollColumns);
+      this._cachedScrollRowGridTemplate = knownWidths
+        ? this._buildScrollGridTemplate(knownWidths)
+        : this._buildBootstrapScrollTemplate(scrollColumns);
     }
     const fixedColumns = this._cachedFixedColumns;
     const scrollColumns = this._cachedScrollColumns;
@@ -3861,12 +4162,8 @@ class DivTable {
     const cell = document.createElement('div');
     cell.className = 'div-table-cell';
 
-    // Apply text alignment from column config (single column only)
-    if (!composite.compositeName && composite.columns[0]?.align) {
-      cell.style.textAlign = composite.columns[0].align;
-      cell.style.justifyContent = composite.columns[0].align === 'right' ? 'flex-end' : 
-                                   composite.columns[0].align === 'center' ? 'center' : 'flex-start';
-    }
+    // Store column align for use when creating the content span
+    const colAlign = !composite.compositeName ? composite.columns[0]?.align : null;
 
     if (composite.compositeName) {
       cell.classList.add('composite-cell');
@@ -3941,6 +4238,7 @@ class DivTable {
         } else {
           const contentSpan = document.createElement('span');
           contentSpan.className = 'cell-content';
+          if (colAlign) contentSpan.style.textAlign = colAlign;
           contentSpan.innerHTML = typeof col.render === 'function' ? col.render(item[col.field], item) : (item[col.field] ?? '');
           contentSpan.title = this.stripHtmlTags(contentSpan.innerHTML);
           if (col && col.field) contentSpan.dataset.field = col.field;
@@ -3974,13 +4272,7 @@ class DivTable {
     const scrollGroupHeader = document.createElement('div');
     scrollGroupHeader.className = 'div-table-row group-header div-table-scroll-row';
     scrollGroupHeader.dataset.groupKey = group.key;
-    
-    // Build grid template for scrollable section
-    let scrollGridTemplate = '';
-    scrollColumns.forEach(composite => {
-      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
-    });
-    scrollGroupHeader.style.gridTemplateColumns = scrollGridTemplate.trim();
+    scrollGroupHeader.style.gridTemplateColumns = '100%';
     
     if (this.collapsedGroups.has(group.key)) {
       fixedGroupHeader.classList.add('collapsed');
@@ -4201,6 +4493,8 @@ class DivTable {
         fixedGroupHeader.classList.add('collapsed');
         scrollGroupHeader.classList.add('collapsed');
       }
+      // Re-measure column widths since group visibility changed
+      this._columnWidthsDirty = true;
       this.render();
     };
     
@@ -4447,16 +4741,12 @@ class DivTable {
           });
         } else {
           const col = composite.columns[0];
-          if (col.align) {
-            aggCell.style.textAlign = col.align;
-            aggCell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
-                                           col.align === 'center' ? 'center' : 'flex-start';
-          }
           if (col.aggregate) {
             const aggregateValue = this.calculateAggregate(col, groupData);
             const formattedValue = this.formatAggregateValue(aggregateValue, col);
             const contentSpan = document.createElement('span');
             contentSpan.className = 'cell-content';
+            if (col.align) contentSpan.style.textAlign = col.align;
             contentSpan.innerHTML = formattedValue;
             aggCell.appendChild(contentSpan);
             aggCell.classList.add('aggregate-value');
@@ -4479,6 +4769,8 @@ class DivTable {
         this.collapsedGroups.add(group.key);
         groupRow.classList.add('collapsed');
       }
+      // Re-measure column widths since group visibility changed
+      this._columnWidthsDirty = true;
       this.render();
       
       // After render, restore focus
@@ -5298,8 +5590,11 @@ class DivTable {
         this.sortMode = 'value'; // Reset to value mode for non-grouped fields
       }
     }
-    
-    this._renderDeferred();
+
+    // Sort-only render: header indicators are patched in place and the body
+    // rows are reordered rather than rebuilt (see _renderDeferred /
+    // renderBodyWithFixedColumns).
+    this._renderDeferred({ sortOnly: true });
   }
 
   group(field) {
@@ -5321,6 +5616,8 @@ class DivTable {
     }
     
     this.groupByField = field || null;
+    // Grouping changes which cells are empty, so content-width measurements are stale.
+    this._columnWidthsDirty = true;
     
     if (field) {
       // When grouping is enabled, collapse/expand based on groupCollapsed option (default: collapsed)
@@ -6027,8 +6324,19 @@ class DivTable {
     if (addedCount > 0 || updatedCount > 0) {
       this.isLoadingState = false;
 
-      // New data may contain wider cell content — invalidate column width cache
-      this._columnWidthsDirty = true;
+      // New data may contain wider cell content.
+      // On append: mark as expand-only (re-measure but keep previous minimums).
+      // On full replace: dirty flag is set separately by replaceData().
+      if (addedCount > 0 && updatedCount === 0) {
+        // Pure append: keep min widths, expand if needed
+        this._columnWidthsDirty = 'expand-only';
+      } else if (addedCount === 0 && updatedCount > 0) {
+        // Pure update: keep cache if content-size unchanged, otherwise expand
+        this._columnWidthsDirty = 'expand-only';
+      } else {
+        // Mixed or unknown scenario: full recalc
+        this._columnWidthsDirty = true;
+      }
 
       // Update the query engine with new/updated data
       this.queryEngine.setObjects(this.data);
@@ -6353,113 +6661,13 @@ class DivTable {
         // Single column
         const col = composite.columns[0];
         
-        // Apply column alignment
-        if (col.align) {
-          cell.style.textAlign = col.align;
-          cell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
-                                       col.align === 'center' ? 'center' : 'flex-start';
-        }
-        
         if (col.aggregate) {
           const aggregateValue = this.calculateAggregate(col, aggregationData);
           const formattedValue = this.formatAggregateValue(aggregateValue, col);
           // Wrap in span for proper flex alignment
           const contentSpan = document.createElement('span');
           contentSpan.className = 'cell-content';
-          contentSpan.innerHTML = formattedValue;
-          cell.appendChild(contentSpan);
-          cell.classList.add('aggregate-value');
-        }
-      }
-      
-      summaryRow.appendChild(cell);
-    });
-    
-    return summaryRow;
-  }
-
-  /**
-   * Create a group summary row (subtotal row after group items)
-   * @param {Object} group - Group object with items array
-   * @returns {HTMLElement} Group summary row element
-   */
-  createGroupSummaryRow(group) {
-    const summaryRow = document.createElement('div');
-    summaryRow.className = 'div-table-row summary-row group-summary';
-    summaryRow.dataset.groupKey = group.key;
-    
-    const compositeColumns = this.getCompositeColumns();
-    
-    // For group summary, aggregate only the items in this group
-    // But also respect selection: if items are selected, only aggregate selected items in this group
-    let groupData = group.items;
-    if (this.selectedRows.size > 0) {
-      groupData = group.items.filter(item => {
-        const itemId = String(item[this.primaryKeyField]);
-        return this.selectedRows.has(itemId);
-      });
-    }
-    
-    // Build grid template matching body rows
-    let gridTemplate = '';
-    if (this.showCheckboxes) {
-      gridTemplate = '40px ';
-    }
-    
-    compositeColumns.forEach(composite => {
-      gridTemplate += this._getGridSize(composite) + ' ';
-    });
-    
-    summaryRow.style.gridTemplateColumns = gridTemplate.trim();
-    
-    // Empty checkbox cell
-    if (this.showCheckboxes) {
-      const emptyCell = document.createElement('div');
-      emptyCell.className = 'div-table-cell checkbox-column summary-cell';
-      summaryRow.appendChild(emptyCell);
-    }
-    
-    // Create cells for each composite column
-    compositeColumns.forEach(composite => {
-      const cell = document.createElement('div');
-      cell.className = 'div-table-cell summary-cell';
-      
-      if (composite.compositeName) {
-        cell.classList.add('composite-cell');
-        
-        composite.columns.forEach(col => {
-          const subCell = document.createElement('div');
-          subCell.className = 'composite-sub-cell';
-          
-          if (col.aggregate) {
-            const aggregateValue = this.calculateAggregate(col, groupData);
-            const formattedValue = this.formatAggregateValue(aggregateValue, col);
-            subCell.innerHTML = formattedValue;
-            subCell.classList.add('aggregate-value');
-            // Apply column alignment
-            if (col.align) {
-              subCell.style.textAlign = col.align;
-            }
-          }
-          
-          cell.appendChild(subCell);
-        });
-      } else {
-        const col = composite.columns[0];
-        
-        // Apply column alignment
-        if (col.align) {
-          cell.style.textAlign = col.align;
-          cell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
-                                       col.align === 'center' ? 'center' : 'flex-start';
-        }
-        
-        if (col.aggregate) {
-          const aggregateValue = this.calculateAggregate(col, groupData);
-          const formattedValue = this.formatAggregateValue(aggregateValue, col);
-          // Wrap in span for proper flex alignment
-          const contentSpan = document.createElement('span');
-          contentSpan.className = 'cell-content';
+          if (col.align) contentSpan.style.textAlign = col.align;
           contentSpan.innerHTML = formattedValue;
           cell.appendChild(contentSpan);
           cell.classList.add('aggregate-value');
@@ -6509,87 +6717,22 @@ class DivTable {
       fixedSummary.appendChild(cell);
     });
     
-    // Scroll section summary row
+    // Scroll section summary row — use measured pixel widths when available so
+    // it matches the data rows immediately instead of flipping from the
+    // responsive fr default to pixels a moment later.
     const scrollSummary = document.createElement('div');
     scrollSummary.className = 'div-table-row summary-row header-summary';
-    
-    let scrollGridTemplate = '';
-    scrollColumns.forEach(composite => {
-      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
-    });
-    
+
+    const knownSummaryWidths = this._getKnownScrollWidths(scrollColumns);
+    const scrollGridTemplate = knownSummaryWidths
+      ? this._buildScrollGridTemplate(knownSummaryWidths)
+      : this._buildBootstrapScrollTemplate(scrollColumns);
+
     scrollSummary.style.gridTemplateColumns = scrollGridTemplate.trim();
     
     // Scroll columns cells
     scrollColumns.forEach(composite => {
       const cell = this.createSummaryCell(composite, aggregationData);
-      scrollSummary.appendChild(cell);
-    });
-    
-    return { fixedSummary, scrollSummary };
-  }
-
-  /**
-   * Create group summary row pair for fixed columns layout
-   * @param {Object} group - Group object with items array
-   * @returns {Object} Object with fixedSummary and scrollSummary elements
-   */
-  createGroupSummaryRowWithFixedColumns(group) {
-    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
-    
-    // Get data for this group, considering selection
-    let groupData = group.items;
-    if (this.selectedRows.size > 0) {
-      groupData = group.items.filter(item => {
-        const itemId = String(item[this.primaryKeyField]);
-        return this.selectedRows.has(itemId);
-      });
-    }
-    
-    // Fixed section summary row
-    const fixedSummary = document.createElement('div');
-    fixedSummary.className = 'div-table-row div-table-fixed-row summary-row group-summary';
-    fixedSummary.dataset.groupKey = group.key;
-    
-    let fixedGridTemplate = '';
-    if (this.showCheckboxes) {
-      fixedGridTemplate = '40px ';
-    }
-    
-    fixedColumns.forEach(composite => {
-      fixedGridTemplate += this.getColumnGridSize(composite, true) + ' ';
-    });
-    
-    fixedSummary.style.gridTemplateColumns = fixedGridTemplate.trim();
-    
-    // Empty checkbox cell
-    if (this.showCheckboxes) {
-      const emptyCell = document.createElement('div');
-      emptyCell.className = 'div-table-cell checkbox-column summary-cell';
-      fixedSummary.appendChild(emptyCell);
-    }
-    
-    // Fixed columns cells
-    fixedColumns.forEach(composite => {
-      const cell = this.createSummaryCell(composite, groupData);
-      fixedSummary.appendChild(cell);
-    });
-    
-    // Scroll section summary row
-    const scrollSummary = document.createElement('div');
-    scrollSummary.className = 'div-table-row summary-row group-summary';
-    scrollSummary.dataset.groupKey = group.key;
-    
-    let scrollGridTemplate = '';
-    scrollColumns.forEach(composite => {
-      scrollGridTemplate += this.getColumnGridSize(composite) + ' ';
-    });
-    
-    scrollSummary.style.gridTemplateColumns = scrollGridTemplate.trim();
-    
-    // Scroll columns cells
-    scrollColumns.forEach(composite => {
-      const cell = this.createSummaryCell(composite, groupData);
       scrollSummary.appendChild(cell);
     });
     
@@ -6629,19 +6772,17 @@ class DivTable {
     } else {
       const col = composite.columns[0];
       
-      // Apply column alignment to summary cell
-      if (col.align) {
-        cell.style.textAlign = col.align;
-        cell.style.justifyContent = col.align === 'right' ? 'flex-end' : 
-                                     col.align === 'center' ? 'center' : 'flex-start';
-      }
-      
       if (col.aggregate) {
         const aggregateValue = this.calculateAggregate(col, data);
         const formattedValue = this.formatAggregateValue(aggregateValue, col);
         // Wrap in span for proper flex alignment
         const contentSpan = document.createElement('span');
         contentSpan.className = 'cell-content';
+        if (col.align) {
+          contentSpan.style.textAlign = col.align;
+          cell.style.justifyContent = col.align === 'right' ? 'flex-end' :
+                                       col.align === 'center' ? 'center' : 'flex-start';
+        }
         contentSpan.innerHTML = formattedValue;
         cell.appendChild(contentSpan);
         cell.classList.add('aggregate-value');

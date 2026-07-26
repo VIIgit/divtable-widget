@@ -527,7 +527,6 @@
   white-space: nowrap;
   display: flex;
   align-items: flex-start;
-  min-width: 0;
   box-sizing: border-box;
 }
 
@@ -536,6 +535,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Header cell styling */
@@ -545,13 +546,12 @@
   cursor: pointer;
   user-select: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-start;
   transition: background-color 0.2s ease;
   overflow: hidden;
   position: relative;
   box-sizing: border-box;
-  min-width: 0;
 }
 
 /* Grouped column header - ensure minimum width */
@@ -579,7 +579,7 @@
 /* === HOVER-REVEAL TOOLBAR === */
 .header-right-content {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   padding: 2px 6px;
   border-radius: 6px;
@@ -588,9 +588,9 @@
   
   /* Absolutely positioned - does not affect layout */
   position: absolute;
-  top: 50%;
+  top: 8px;
   right: 8px;
-  transform: translateY(-50%) scale(0.92);
+  transform: scale(0.92);
   z-index: 10;
   
   /* Hidden by default with subtle animation */
@@ -602,7 +602,7 @@
 /* Show toolbar on header hover */
 .div-table-header-cell:hover .header-right-content {
   opacity: 1;
-  transform: translateY(-50%) scale(1);
+  transform: scale(1);
   pointer-events: auto;
 }
 
@@ -908,9 +908,15 @@ input[type="checkbox"]:indeterminate::after {
   gap: 2px;
   background-color: var(--dt-bg-header);
   padding-left: 4px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
-.composite-sub-header:hover .sub-header-icons {
+.composite-sub-header:hover .sub-header-icons,
+.div-table-widget.alt-key-active .composite-sub-header .sub-header-icons {
+  opacity: 1;
+  visibility: visible;
   background-color: var(--dt-bg-disabled);
 }
 
@@ -922,18 +928,26 @@ input[type="checkbox"]:indeterminate::after {
   transform: translateY(-50%);
   background-color: var(--dt-bg-header);
   padding-left: 4px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
-.composite-sub-header:hover > .sub-sort-indicator {
+.composite-sub-header:hover > .sub-sort-indicator,
+.div-table-widget.alt-key-active .composite-sub-header > .sub-sort-indicator {
+  opacity: 1;
+  visibility: visible;
   background-color: var(--dt-bg-disabled);
 }
 
-/* Show sort/group indicators on hover of composite sub-header */
-.composite-sub-header:hover .sort-indicator {
+/* Show sort/group indicators on hover of composite sub-header or when Alt key is active */
+.composite-sub-header:hover .sort-indicator,
+.div-table-widget.alt-key-active .composite-sub-header .sort-indicator {
   opacity: 0.5;
 }
 
-.composite-sub-header:hover .group-indicator {
+.composite-sub-header:hover .group-indicator,
+.div-table-widget.alt-key-active .composite-sub-header .group-indicator {
   opacity: 0.5;
 }
 
@@ -1212,6 +1226,7 @@ input[type="checkbox"]:indeterminate::after {
   position: relative;
   z-index: 10;
   flex-shrink: 0;
+  width: 100%;
   overflow-x: scroll;
   overflow-y: hidden;
   box-sizing: border-box;
@@ -1227,7 +1242,6 @@ input[type="checkbox"]:indeterminate::after {
 /* Inner wrapper for scroll header grid content */
 .div-table-scroll-header-inner {
   display: grid;
-  width: max-content;
   min-width: 100%;
 }
 
@@ -1358,7 +1372,6 @@ input[type="checkbox"]:indeterminate::after {
 /* Ensure scroll section rows don't constrain content */
 .div-table-scroll-row {
   min-width: 100%;
-  width: max-content;
 }
 
 /* Mobile: disable fixed columns on small screens */
