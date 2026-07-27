@@ -1,0 +1,330 @@
+
+# Global Settings — Developer Guide
+
+## Overview
+
+The Global Settings system provides a cross-page, URL-shareable filter context for **Region** and **Environment**. Each page explicitly declares which of these settings are relevant to its content. The sticky filter bar in the header renders only the relevant controls — and disappears entirely on pages where no settings apply.
+
+---
+
+## Architecture
+
+```
+URL hash (#region=CH&env=PROD)
+       ↕  (highest priority on load; updated on every change via replaceState)
+GlobalSettingsContext           ← single source of truth, lives for the whole session
+   ├─ region / environment      ← current values
+   └─ activeKeys                ← which settings the current page declared relevant
+       ↕
+Header filter bar               ← reads activeKeys; hides irrelevant pills / hides itself
+       ↕
+Per-page usePageGlobalSettings  ← each page declares its activeKeys on mount / clears on unmount
+       ↕
+Per-view consumption            ← views read region/environment and filter their data
+```
+
+### Files
+
+| File | Role |
+|---|---|
+| `src/app/context/GlobalSettingsContext.tsx` | Context provider, URL hash sync, both hooks |
+| `src/app/components/layout/Header.tsx` | Sticky filter bar — renders based on `activeKeys` |
+| `src/views/Catalog.tsx` | `['region']` — passes region to APIUniverse |
+| `src/app/components/domain/APIUniverse.tsx` | Accepts `region` prop, filters realm nodes |
+| `src/views/HostingInfra.tsx` | `['region', 'environment']` — syncs both into local filter state |
+| `src/views/Realms.tsx` | `['region', 'environment']` |
+| `src/views/Topology.tsx` | `['region', 'environment']` |
+| `src/views/Landing.tsx` | `[]` — filter bar hidden |
+| `src/views/Admin.tsx` | `[]` — filter bar hidden |
+| `src/views/Developers.tsx` | `[]` — filter bar hidden |
+| `src/views/CreateArtifacts.tsx` | `[]` — filter bar hidden |
+
+---
+
+## Declaring Relevant Settings in a Page
+
+Every page component must call `usePageGlobalSettings` as its first hook. Pass the keys that are meaningful in that page's context:
+
+```tsx
+import { usePageGlobalSettings } from '../app/context/GlobalSettingsContext';
+
+export function MyView() {
+  // Declare which global settings apply to this page.
+  // The header will only show the pills for these keys.
+  usePageGlobalSettings(['region', 'environment']); // both filters visible
+  // usePageGlobalSettings(['region']);             // only region filter
+  // usePageGlobalSettings([]);                     // filter bar hidden
+  ...
+}
+```
+
+**What this does:**
+- On mount: sets `activeKeys` in the context → the Header renders matching pills.
+- On unmount: clears `activeKeys` → the Header hides itself before the next page mounts.
+
+**Rules:**
+- Call it unconditionally at the top level of the component (Rules of Hooks).
+- Always call it, even with `[]`, so navigation between pages reliably clears the previous page's keys.
+- Do not call it inside child components — it belongs in the top-level page/view component only.
+
+---
+
+## Consuming Settings in a Page
+
+```tsx
+import { useGlobalSettings, usePageGlobalSettings } from '../app/context/GlobalSettingsContext';
+
+export function MyView() {
+  usePageGlobalSettings(['region']);
+
+  const { region } = useGlobalSettings();
+
+  const filtered = data.filter(item =>
+    region === 'all' || item.region === region
+  );
+
+  return <div>{/* render filtered */}</div>;
+}
+```
+
+`useGlobalSettings` throws if called outside `GlobalSettingsProvider` — all views in the app tree are already wrapped.
+
+---
+
+## Types
+
+```ts
+type Region           = 'all' | 'CH' | 'APAC' | 'US';
+type Environment      = 'all' | 'PROD' | 'TE2' | 'TE1' | 'DEV';
+type GlobalSettingKey = 'region' | 'environment';
+
+interface GlobalSettings {
+  region: Region;
+  environment: Environment;
+}
+```
+
+---
+
+## Priority Resolution
+
+When the app first loads, the initial value for each setting is resolved in this order:
+
+1. **URL hash** — `#region=CH&env=PROD` — highest priority. Enables shareable links.
+2. **In-memory global state** — persists across tab/page switches for the session lifetime.
+3. **Default** — `'all'` — used when no URL param and no previously set value.
+
+Any change to a setting via the header filter bar immediately:
+- Updates in-memory state (all subscribed views re-render)
+- Updates the URL hash via `window.history.replaceState` (no history pollution)
+
+---
+
+## URL Hash Format
+
+```
+#region=CH&env=PROD
+```
+
+- Parameters are omitted when set to `'all'` (keeps URLs clean)
+- Hash is updated via `replaceState` — browser back/forward history is not affected
+- External hash changes (pasting a link, browser back/forward) trigger a `hashchange` listener that syncs context state
+
+---
+
+## Header Filter Bar Visibility Rules
+
+| `activeKeys` content | Filter bar |
+|---|---|
+| `['region', 'environment']` | Both region and env pill groups visible |
+| `['region']` | Only region pills visible |
+| `['environment']` | Only env pills visible |
+| `[]` or not yet set | Filter bar hidden entirely |
+
+The bar also shows a **Reset** link when at least one *visible* filter is not set to `'all'`.
+
+---
+
+## Local Override Pattern (used in HostingInfra)
+
+Some pages have additional local filters (e.g. type filter) alongside the global ones. They initialize local state from globals and stay in sync:
+
+```tsx
+const { region: globalRegion, environment: globalEnvironment } = useGlobalSettings();
+const [selectedRegion, setSelectedRegion] = useState(globalRegion);
+const [selectedEnv, setSelectedEnv] = useState(globalEnvironment);
+
+// Global changes (header, URL) always override the local selection
+useEffect(() => { setSelectedRegion(globalRegion); }, [globalRegion]);
+useEffect(() => { setSelectedEnv(globalEnvironment); }, [globalEnvironment]);
+```
+
+The header/URL always takes precedence. The user can further refine locally (e.g. switch from APAC to US within the page), but the next global change will reset that local override.
+
+---
+
+## Region → Realm Mapping (APIUniverse)
+
+The mock data uses realm names (`EU-Central`, `APAC`, `US-East`, `US-West`). The global region tokens are mapped:
+
+| Global Region | Matched Realm Names |
+|---|---|
+| `CH` | `EU-Central` |
+| `APAC` | `APAC` |
+| `US` | `US-East`, `US-West` |
+| `all` | No filtering — all realms shown |
+
+This mapping lives in `APIUniverse.tsx`. Update it if realm names change in the data layer.
+
+---
+
+## Extending with a New Setting
+
+To add a new global setting (e.g. `tenant`):
+
+1. Add `Tenant` type and `tenant` field to `GlobalSettings` in `GlobalSettingsContext.tsx`
+2. Add `'tenant'` to `GlobalSettingKey`
+3. Add `params.get('tenant')` parsing in `parseHash()` and `params.set('tenant', ...)` in `writeHash()`
+4. Add `useState`, setter, and include in the context value and `useMemo`
+5. Add a pill group in `Header.tsx` (conditionally rendered when `activeKeys.has('tenant')`)
+6. In each page that needs it, add `'tenant'` to the `usePageGlobalSettings([...])` call
+7. Consume via `useGlobalSettings()` in the view's filtering logic
+
+
+/**
+ * Global Settings Context
+ * See skill.md for full developer documentation.
+ *
+ * Priority order for initial value resolution:
+ *   1. URL hash (#region=CH&env=PROD)  — highest priority
+ *   2. In-memory global state          — persists across tab switches
+ *   3. Default fallback ('all')        — lowest priority
+ *
+ * Each page declares which settings it uses via usePageGlobalSettings([...]).
+ * The sticky filter bar in the Header only shows the settings relevant to the
+ * current page, and hides itself entirely when no settings are applicable.
+ */
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+
+export type Region = 'all' | 'CH' | 'APAC' | 'US';
+export type Environment = 'all' | 'PROD' | 'TE2' | 'TE1' | 'DEV';
+export type GlobalSettingKey = 'region' | 'environment';
+
+export interface GlobalSettings {
+  region: Region;
+  environment: Environment;
+}
+
+interface GlobalSettingsContextValue extends GlobalSettings {
+  setRegion: (r: Region) => void;
+  setEnvironment: (e: Environment) => void;
+  /** Keys declared relevant by the currently mounted page. */
+  activeKeys: ReadonlySet<GlobalSettingKey>;
+  /** Internal — use usePageGlobalSettings() instead. */
+  _setActiveKeys: (keys: GlobalSettingKey[]) => void;
+}
+
+const GlobalSettingsContext = createContext<GlobalSettingsContextValue | null>(null);
+
+// ─── URL hash helpers ─────────────────────────────────────────────────────────
+
+function parseHash(): Partial<GlobalSettings> {
+  const hash = window.location.hash.replace(/^#/, '');
+  const params = new URLSearchParams(hash);
+  const result: Partial<GlobalSettings> = {};
+  const r = params.get('region');
+  if (r === 'CH' || r === 'APAC' || r === 'US' || r === 'all') result.region = r;
+  const e = params.get('env');
+  if (e === 'PROD' || e === 'TE2' || e === 'TE1' || e === 'DEV' || e === 'all') result.environment = e;
+  return result;
+}
+
+function writeHash(settings: GlobalSettings) {
+  const params = new URLSearchParams();
+  if (settings.region !== 'all') params.set('region', settings.region);
+  if (settings.environment !== 'all') params.set('env', settings.environment);
+  const hash = params.toString();
+  const newUrl = hash
+    ? `${window.location.pathname}${window.location.search}#${hash}`
+    : window.location.pathname + window.location.search;
+  window.history.replaceState(null, '', newUrl);
+}
+
+// ─── Provider ────────────────────────────────────────────────────────────────
+
+export function GlobalSettingsProvider({ children }: { children: ReactNode }) {
+  const initialFromHash = parseHash();
+  const [region, setRegionState] = useState<Region>(initialFromHash.region ?? 'all');
+  const [environment, setEnvironmentState] = useState<Environment>(initialFromHash.environment ?? 'all');
+  const [activeKeys, setActiveKeysState] = useState<ReadonlySet<GlobalSettingKey>>(new Set());
+
+  useEffect(() => {
+    writeHash({ region, environment });
+  }, [region, environment]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const fromHash = parseHash();
+      if (fromHash.region !== undefined) setRegionState(fromHash.region);
+      if (fromHash.environment !== undefined) setEnvironmentState(fromHash.environment);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const setRegion = useCallback((r: Region) => setRegionState(r), []);
+  const setEnvironment = useCallback((e: Environment) => setEnvironmentState(e), []);
+  const _setActiveKeys = useCallback((keys: GlobalSettingKey[]) => {
+    setActiveKeysState(new Set(keys));
+  }, []);
+
+  const value = useMemo(
+    () => ({ region, environment, setRegion, setEnvironment, activeKeys, _setActiveKeys }),
+    [region, environment, setRegion, setEnvironment, activeKeys, _setActiveKeys]
+  );
+
+  return (
+    <GlobalSettingsContext.Provider value={value}>
+      {children}
+    </GlobalSettingsContext.Provider>
+  );
+}
+
+// ─── Hooks ───────────────────────────────────────────────────────────────────
+
+export function useGlobalSettings(): GlobalSettingsContextValue {
+  const ctx = useContext(GlobalSettingsContext);
+  if (!ctx) throw new Error('useGlobalSettings must be used inside GlobalSettingsProvider');
+  return ctx;
+}
+
+/**
+ * Declare which global settings are relevant for the calling page.
+ * Call this once at the top of each page component.
+ *
+ *   usePageGlobalSettings(['region', 'environment']);  // show both filters
+ *   usePageGlobalSettings(['region']);                 // only region filter
+ *   usePageGlobalSettings([]);                         // hide the filter bar
+ *
+ * On unmount the filter bar is automatically hidden so it doesn't linger
+ * when navigating to a page that hasn't declared its settings yet.
+ */
+export function usePageGlobalSettings(keys: GlobalSettingKey[]) {
+  const { _setActiveKeys } = useGlobalSettings();
+  // Stringify to keep a stable dependency without requiring the caller to memoize the array
+  const keysKey = keys.slice().sort().join(',');
+  useEffect(() => {
+    _setActiveKeys(keys);
+    return () => _setActiveKeys([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keysKey, _setActiveKeys]);
+}
