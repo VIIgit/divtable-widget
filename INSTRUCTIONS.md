@@ -207,10 +207,6 @@ Each entry in the `columns` array is an object:
 | Method | Description |
 |--------|-------------|
 | `setTotalRecords(n)` | Update expected total records count. |
-| `setPageSize(n)` | Change page size (recalculates loading threshold). |
-| `setVirtualScrollingConfig({ totalRecords, pageSize, loadingThreshold })` | Batch-update virtual scrolling parameters. |
-| `setHasMoreData(bool)` | Manually control whether more pages are expected. |
-| `resetPagination()` | Reset to page 0, keep only first page of data. |
 | `stopAutoFetch()` | Stop the auto-fetch loop. |
 
 ### Query
@@ -219,15 +215,6 @@ Each entry in the `columns` array is an object:
 |--------|-------------|
 | `applyQuery(queryString)` | Programmatically apply a filter query. |
 
-### Focus
-
-| Method | Description |
-|--------|-------------|
-| `focusRow(index)` | Focus a row by its visible index. |
-| `focusFirstRecord()` | Focus the first data row. |
-| `setFocusedRow(rowId)` | Focus a row by its primary key value. |
-| `setFocusedGroup(group)` | Focus a group header row. |
-
 ### Column Accessors
 
 | Method | Returns |
@@ -235,13 +222,6 @@ Each entry in the `columns` array is an object:
 | `getOrderedColumns()` | Visible columns in display order. |
 | `getCompositeColumns()` | Columns grouped by `fieldCompositeName`. |
 | `getAllColumns()` | All column definitions (including hidden). |
-
-### Debug
-
-| Method | Description |
-|--------|-------------|
-| `verifyDataConsistency()` | Check data/selection/DOM consistency. Returns `true` if clean. |
-| `testGroupSelectionStates()` | Log group selection states to console. |
 
 ---
 

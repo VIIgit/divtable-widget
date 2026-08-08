@@ -318,8 +318,8 @@ const divTable = new DivTable(monaco, {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `virtualScrolling` | Boolean | `false` | Enable virtual scrolling mode for large datasets |
-| `pageSize` | Number | `100` | Number of rows per page |
-| `totalRecords` | Number | `pageSize * 10` | Total number of records available (for progress calculation) |
+| `pageSize` | Number | `100` | Number of rows per page. Set to `0` to disable pagination/total tracking |
+| `totalRecords` | Number | `null` | Total number of records available (for progress calculation). Only used when pagination is enabled |
 | `loadingThreshold` | Number | `pageSize * 0.8` | Trigger loading when this many rows from end |
 | `scrollThreshold` | Number | `0.95` | Fallback percentage-based scroll threshold |
 | `showAutoFetchButton` | Boolean | `true` | Show auto-fetch play/pause/resume button |

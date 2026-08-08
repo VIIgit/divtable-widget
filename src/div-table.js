@@ -53,12 +53,14 @@ class DivTable {
     
     // Virtual scrolling options
     this.virtualScrolling = options.virtualScrolling || false;
-    this.pageSize = options.pageSize || 100;
-    // If totalRecords not provided and virtual scrolling is enabled, assume 10x page size for progress bar animation
-    this.totalRecords = options.totalRecords || (this.virtualScrolling ? this.pageSize * 10 : this.data.length);
+    this.pageSize = typeof options.pageSize === 'number' && options.pageSize >= 0 ? options.pageSize : 100;
+    this._configuredTotalRecords = this._normalizeTotalRecords(options.totalRecords);
+    this.totalRecords = null;
     this.onNextPage = options.onNextPage || (() => {});
     this.onPreviousPage = options.onPreviousPage || (() => {});
-    this.loadingThreshold = options.loadingThreshold || Math.floor(this.pageSize * 0.8); // Default: 80% of page size
+    this.loadingThreshold = typeof options.loadingThreshold === 'number'
+      ? options.loadingThreshold
+      : (this.pageSize > 0 ? Math.floor(this.pageSize * 0.8) : 0); // Default: 80% of page size
     this.scrollThreshold = options.scrollThreshold || 0.95; // Fallback for percentage-based logic
     
     // Internal state
@@ -91,7 +93,7 @@ class DivTable {
     this.hasMoreData = true;
     this.estimatedRowHeight = 40; // Default row height for calculations
     this.visibleStartIndex = 0;
-    this.visibleEndIndex = this.pageSize;
+    this.visibleEndIndex = this.pageSize > 0 ? this.pageSize : this.data.length;
     
     // Auto-fetch state
     this.isAutoFetching = false;
@@ -127,6 +129,10 @@ class DivTable {
     this._groupHeaderRegistry = null;
     this._headerSummaryRegistry = null;
     this._rowRegistrySnapshot = null;
+
+    this._syncTotalRecords();
+    this._shouldLoadFirstPage = this._shouldLoadFirstPage && this.pageSize > 0;
+    this.hasMoreData = this._usesPagination() ? this._calculateHasMoreData() : false;
 
     // Initialize the widget
     this.init();
@@ -190,6 +196,59 @@ class DivTable {
     }
   }
 
+  _normalizeTotalRecords(totalRecords) {
+    return typeof totalRecords === 'number' && totalRecords >= 0 ? totalRecords : null;
+  }
+
+  _usesPagination() {
+    return this.virtualScrolling && this.pageSize > 0;
+  }
+
+  _hasKnownTotalRecords() {
+    return this.pageSize > 0 && this._configuredTotalRecords !== null;
+  }
+
+  _syncTotalRecords(mode = 'replace') {
+    if (this.pageSize === 0) {
+      this.totalRecords = null;
+      return;
+    }
+
+    if (this._hasKnownTotalRecords()) {
+      this.totalRecords = Math.max(this._configuredTotalRecords, this.data.length);
+      return;
+    }
+
+    if (!this.virtualScrolling) {
+      this.totalRecords = this.data.length;
+      return;
+    }
+
+    this.totalRecords = mode === 'append' ? this.data.length : null;
+  }
+
+  _getComparableTotalRecords() {
+    return typeof this.totalRecords === 'number' && this.totalRecords >= 0
+      ? Math.max(this.totalRecords, this.data.length)
+      : this.data.length;
+  }
+
+  _calculateHasMoreData(lastBatchSize = null) {
+    if (!this._usesPagination()) {
+      return false;
+    }
+
+    if (this._hasKnownTotalRecords()) {
+      return this.data.length < this.totalRecords;
+    }
+
+    if (typeof lastBatchSize === 'number') {
+      return lastBatchSize === this.pageSize;
+    }
+
+    return true;
+  }
+
   stripHtmlTags(html) {
     if (!html) return '';
     // Replace <br> and <br/> with space, then strip all other HTML tags
@@ -215,22 +274,22 @@ class DivTable {
     }
 
     // Create the table structure
-    this.createTableStructure(container);
+    this._createTableStructure(container);
     
     // Set up query editor
-    this.setupQueryEditor();
+    this._setupQueryEditor();
     
     // Initial render
-    this.render();
+    this._render();
     
     // Set up keyboard navigation
-    this.setupKeyboardNavigation();
+    this._setupKeyboardNavigation();
     
     // Auto-load first page if no data was provided but onNextPage is available
     // Use setTimeout to ensure the constructor has returned and variable assignment is complete
     if (this._shouldLoadFirstPage) {
       setTimeout(() => this.loadFirstPageAutomatically(), 100);
-    } else if (this.virtualScrolling && this.data.length < this.totalRecords && typeof this.onNextPage === 'function') {
+    } else if (this._hasKnownTotalRecords() && this.data.length < this.totalRecords && typeof this.onNextPage === 'function') {
       // If virtual scrolling is enabled with initial data but more data is available,
       // automatically trigger loading the next page to show progress bar animation
       setTimeout(() => this.loadNextPage(), 100);
@@ -241,7 +300,7 @@ class DivTable {
     try {
       // Set loading state before fetching data
       this.isLoading = true;
-      this.updateInfoSection();
+      this._updateInfoSection();
       
       const firstPageData = await this.onNextPage(0, this.pageSize);
       
@@ -253,15 +312,16 @@ class DivTable {
       } else {
         // No data returned
         this.isLoadingState = false;
+        this._syncTotalRecords();
         this.hasMoreData = false;
-        this.render();
+        this._render();
       }
     } catch (error) {
       console.error('❌ Error loading first page:', error);
       this.isLoading = false;
       this.isLoadingState = false;
       this.hasMoreData = false;
-      this.render();
+      this._render();
     }
   }
 
@@ -323,7 +383,7 @@ class DivTable {
     return this.columns;
   }
 
-  createTableStructure(container) {
+  _createTableStructure(container) {
     // Find or create toolbar
     this.toolbar = container.querySelector('.div-table-toolbar');
     if (!this.toolbar) {
@@ -333,7 +393,7 @@ class DivTable {
     }
 
     // Create toolbar elements if they don't exist
-    this.createToolbarElements();
+    this._createToolbarElements();
 
     // Create main table container
     this.tableContainer = document.createElement('div');
@@ -343,7 +403,7 @@ class DivTable {
     // Check if we need fixed columns layout
     if (this.fixedColumns > 0) {
       this.tableContainer.classList.add('has-fixed-columns');
-      this.createFixedColumnsStructure();
+      this._createFixedColumnsStructure();
     } else {
       // Standard layout without fixed columns
       // Create header
@@ -360,10 +420,10 @@ class DivTable {
     }
 
     // Set up scroll shadow effect
-    this.setupScrollShadow();
+    this._setupScrollShadow();
   }
 
-  createFixedColumnsStructure() {
+  _createFixedColumnsStructure() {
     // Create wrapper for horizontal layout
     this.columnsWrapper = document.createElement('div');
     this.columnsWrapper.className = 'div-table-columns-wrapper';
@@ -405,12 +465,12 @@ class DivTable {
     this.bodyContainer = this.scrollBodyContainer;
 
     // Set up scroll synchronization between fixed and scrollable body
-    this.setupFixedColumnsScrollSync();
+    this._setupFixedColumnsScrollSync();
     // Set up row event delegation so renders don't register O(n) listeners
     this._setupFixedColumnsRowDelegation();
   }
 
-  setupFixedColumnsScrollSync() {
+  _setupFixedColumnsScrollSync() {
     let isSyncingScroll = false;
 
     this.scrollBodyContainer.addEventListener('scroll', () => {
@@ -442,11 +502,11 @@ class DivTable {
     });
     
     // Adjust fixed body padding for horizontal scrollbar height
-    this.adjustFixedBodyForHorizontalScrollbar();
+    this._adjustFixedBodyForHorizontalScrollbar();
     
     // Re-adjust on window resize
     window.addEventListener('resize', () => {
-      this.adjustFixedBodyForHorizontalScrollbar();
+      this._adjustFixedBodyForHorizontalScrollbar();
     });
   }
   
@@ -454,7 +514,7 @@ class DivTable {
    * Adjust fixed body padding to account for horizontal scrollbar in scroll body
    * This prevents row misalignment at the bottom when scrolled to the end
    */
-  adjustFixedBodyForHorizontalScrollbar() {
+  _adjustFixedBodyForHorizontalScrollbar() {
     if (!this.fixedBodyContainer || !this.scrollBodyContainer) return;
     
     // Calculate horizontal scrollbar height
@@ -514,7 +574,7 @@ class DivTable {
         const item = this._dataMap.get(row.dataset.id);
         const fixedRow = row.classList.contains('div-table-fixed-row') ? row : row._peer;
         const scrollRow = row.classList.contains('div-table-scroll-row') ? row : row._peer;
-        if (fixedRow && scrollRow && item) this.populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
+        if (fixedRow && scrollRow && item) this._populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
       }
       const fixedRow = row.classList.contains('div-table-fixed-row') ? row : row._peer;
       if (fixedRow) this.focusRowFromClick(fixedRow);
@@ -528,9 +588,9 @@ class DivTable {
       if (!row) return;
       if (row.dataset.populated === 'false') {
         const item = this._dataMap.get(row.dataset.id);
-        if (item) this.populateRowCellsWithFixedColumns(row, row._peer, item);
+        if (item) this._populateRowCellsWithFixedColumns(row, row._peer, item);
       }
-      this.updateFocusStateForFixedRows(row, row._peer);
+      this._updateFocusStateForFixedRows(row, row._peer);
     }, true);
 
     // --- Contextmenu ---
@@ -570,15 +630,15 @@ class DivTable {
         row.classList.remove('selected');
         if (scrollRow) scrollRow.classList.remove('selected');
         if (this.showOnlySelected) {
-          this.renderBody();
-          this.updateInfoSection();
+          this._renderBody();
+          this._updateInfoSection();
           const sel = Array.from(this.selectedRows).map(i => this.findRowData(i)).filter(Boolean);
           if (typeof this.onSelectionChange === 'function') this.onSelectionChange(sel);
           return;
         }
       }
       this.updateSelectionStates();
-      this.updateInfoSection();
+      this._updateInfoSection();
       const sel = Array.from(this.selectedRows).map(i => this.findRowData(i)).filter(Boolean);
       if (typeof this.onSelectionChange === 'function') this.onSelectionChange(sel);
     });
@@ -607,7 +667,7 @@ class DivTable {
       if (!row) return;
       if (row.dataset.populated === 'false') {
         const item = this._dataMap.get(row.dataset.id);
-        if (item) this.populateRowCells(row, item);
+        if (item) this._populateRowCells(row, item);
       }
       this.focusRowFromClick(row);
     });
@@ -618,7 +678,7 @@ class DivTable {
       if (!row) return;
       if (row.dataset.populated === 'false') {
         const item = this._dataMap.get(row.dataset.id);
-        if (item) this.populateRowCells(row, item);
+        if (item) this._populateRowCells(row, item);
       }
       this.updateFocusState(row);
     }, true);
@@ -651,31 +711,24 @@ class DivTable {
         rowData.selected = false;
         row.classList.remove('selected');
         if (this.showOnlySelected) {
-          this.renderBody();
-          this.updateInfoSection();
+          this._renderBody();
+          this._updateInfoSection();
           const sel = Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean);
           if (typeof this.onSelectionChange === 'function') this.onSelectionChange(sel);
           return;
         }
       }
       this.updateSelectionStates();
-      this.updateInfoSection();
+      this._updateInfoSection();
       const sel = Array.from(this.selectedRows).map(id => this.findRowData(id)).filter(Boolean);
       if (typeof this.onSelectionChange === 'function') this.onSelectionChange(sel);
     });
   }
 
-  getEffectiveFixedColumnCount() {
-    // Returns the effective number of fixed columns including checkbox if enabled
-    // fixedColumns refers to the number of DATA columns to fix
-    // Checkbox is always part of the fixed section if showCheckboxes is true
-    return this.fixedColumns;
-  }
-
-  splitColumnsForFixedLayout() {
+  _splitColumnsForFixedLayout() {
     // Split composite columns into fixed and scrollable groups
     const compositeColumns = this.getCompositeColumns();
-    const effectiveFixed = this.getEffectiveFixedColumnCount();
+    const effectiveFixed = this.fixedColumns;
     
     const fixedColumns = compositeColumns.slice(0, effectiveFixed);
     const scrollColumns = compositeColumns.slice(effectiveFixed);
@@ -683,7 +736,7 @@ class DivTable {
     return { fixedColumns, scrollColumns };
   }
 
-  createToolbarElements() {
+  _createToolbarElements() {
     // Create query input container if it doesn't exist
     let queryContainer = this.toolbar.querySelector('.query-input-container');
     if (!queryContainer) {
@@ -704,7 +757,7 @@ class DivTable {
     this.infoSection = infoSection;
   }
 
-  setupScrollShadow() {
+  _setupScrollShadow() {
     // For fixed columns layout, use the scroll body container
     const scrollContainer = this.fixedColumns > 0 ? this.scrollBodyContainer : this.bodyContainer;
     const headerContainer = this.fixedColumns > 0 ? this.scrollHeaderContainer : this.headerContainer;
@@ -730,7 +783,7 @@ class DivTable {
     });
   }
 
-  setupQueryEditor() {
+  _setupQueryEditor() {
     const queryContainer = this.toolbar.querySelector('.query-input-container');
     if (!queryContainer) return;
 
@@ -854,7 +907,7 @@ class DivTable {
     }
   }
 
-  handleQueryChange(query) {
+  _handleQueryChange(query) {
     // If no query parameter provided, get it from the model (for debounced calls)
     if (typeof query === 'undefined') {
       query = this.queryEditor.model?.getValue() || '';
@@ -884,7 +937,7 @@ class DivTable {
     let errorTimeout;
     this.queryEditor.model.onDidChangeContent(() => {
       if (errorTimeout) clearTimeout(errorTimeout);
-      errorTimeout = setTimeout(() => this.handleQueryChange(), 350);
+      errorTimeout = setTimeout(() => this._handleQueryChange(), 350);
     });
   }
 
@@ -982,12 +1035,12 @@ class DivTable {
     }
   }
 
-  setupKeyboardNavigation() {
+  _setupKeyboardNavigation() {
     // For fixed columns, use fixed body container for keyboard events
     const bodyContainer = this.fixedColumns > 0 ? this.fixedBodyContainer : this.bodyContainer;
     
     bodyContainer.addEventListener('keydown', (e) => {
-      this.handleKeyDown(e);
+      this._handleKeyDown(e);
     });
 
     // Track whether focus came from keyboard (Tab) vs mouse click
@@ -1009,7 +1062,7 @@ class DivTable {
       // 2. Focus came from keyboard navigation (Tab), not mouse click
       // This prevents auto-scrolling when clicking the scrollbar
       if (!this.focusedRowId && lastInputWasKeyboard && e.target === bodyContainer) {
-        this.focusFirstRecord();
+        this._focusFirstRecord();
       }
     });
   }
@@ -1049,7 +1102,7 @@ class DivTable {
     return row;
   }
 
-  handleKeyDown(e) {
+  _handleKeyDown(e) {
     // Ctrl+A / Cmd+A: Select all filtered rows
     if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
       e.preventDefault();
@@ -1316,7 +1369,7 @@ class DivTable {
       const groupToRefocus = { key: groupKey };
       // Re-measure column widths since new rows are now visible
       this._columnWidthsDirty = true;
-      this.render();
+      this._render();
       
       // Restore focus to the same group header
       this.restoreGroupFocus(groupToRefocus);
@@ -1334,7 +1387,7 @@ class DivTable {
       const groupToRefocus = { key: groupKey };
       // Re-measure column widths since rows are now hidden
       this._columnWidthsDirty = true;
-      this.render();
+      this._render();
       
       // Restore focus to the same group header
       this.restoreGroupFocus(groupToRefocus);
@@ -1671,12 +1724,12 @@ class DivTable {
 
     if (scrollRow) {
       if (row.dataset.populated !== 'true') {
-        this.populateRowCellsWithFixedColumns(row, scrollRow, item);
+        this._populateRowCellsWithFixedColumns(row, scrollRow, item);
       }
-      this.updateFocusStateForFixedRows(row, scrollRow);
+      this._updateFocusStateForFixedRows(row, scrollRow);
     } else {
       if (row.dataset.populated !== 'true') {
-        this.populateRowCells(row, item);
+        this._populateRowCells(row, item);
       }
       this.updateFocusState(row);
     }
@@ -1727,85 +1780,10 @@ class DivTable {
     return null;
   }
 
-  focusRow(index) {
-    // This method is now replaced by focusElementAtIndex for consistency
-    // but kept for backward compatibility
-    const focusableElements = this.getAllFocusableElements();
-    if (index >= 0 && index < focusableElements.length) {
-      this.focusElementAtIndex(index);
-    }
-  }
-
-  focusFirstRecord() {
+  _focusFirstRecord() {
     const rows = this.getAllFocusableRows();
     if (rows.length > 0) {
-      this.focusRow(0);
-    }
-  }
-
-  setFocusedRow(rowId, skipCheckboxFocus = false) {
-    // Remove previous focus
-    this.bodyContainer.querySelectorAll('.div-table-row.focused').forEach(row => {
-      row.classList.remove('focused');
-    });
-
-    if (rowId) {
-      const row = this.bodyContainer.querySelector(`[data-id="${rowId}"]`);
-      if (row) {
-        row.classList.add('focused');
-        row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        
-        // If the row has a checkbox and we're not skipping focus, focus it to sync tabIndex navigation
-        if (!skipCheckboxFocus) {
-          const checkbox = row.querySelector('input[type="checkbox"]');
-          if (checkbox && document.activeElement !== checkbox) {
-            checkbox.focus();
-          }
-        }
-        
-        // Only trigger callback if this is a different row than last time
-        if (this._lastFocusCallback.rowId !== rowId) {
-          this._lastFocusCallback = { rowId: rowId, groupKey: null };
-          
-          const rowData = this.findRowData(rowId);
-          this.onRowFocus(rowData);
-        }
-      }
-    }
-
-    this.focusedRowId = rowId;
-    // Clear any focused column when focusing a row programmatically
-    this.focusedColumnField = null;
-  }
-
-  setFocusedGroup(group) {
-    // Remove previous focus from both rows and groups
-    this.bodyContainer.querySelectorAll('.div-table-row.focused').forEach(row => {
-      row.classList.remove('focused');
-    });
-
-    // Clear focused row ID since we're focusing a group
-    this.focusedRowId = null;
-    this.focusedColumnField = null;
-
-    // Add focus to the group header
-    const groupRow = this.bodyContainer.querySelector(`[data-group-key="${group.key}"]`);
-    if (groupRow) {
-      groupRow.classList.add('focused');
-      groupRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      
-      // Create group info for the callback
-      const groupColumn = this.columns.find(col => col.field === this.groupByField);
-      const groupInfo = {
-        key: group.key,
-        value: group.value,
-        field: this.groupByField,
-        label: groupColumn?.label || this.groupByField,
-        itemCount: group.items.length
-      };
-      
-      // Trigger focus callback with row=undefined and group info
-      this.onRowFocus(undefined, groupInfo);
+      this.focusElementAtIndex(0);
     }
   }
 
@@ -1914,7 +1892,7 @@ class DivTable {
     
     // Update visual states
     this.updateSelectionStates();
-    this.updateInfoSection();
+    this._updateInfoSection();
     
     // Trigger selection change callback
     if (typeof this.onSelectionChange === 'function') {
@@ -1951,7 +1929,7 @@ class DivTable {
     // Targeted visual update — only touch the affected row(s) rather than
     // iterating the entire DOM (avoids a long task that kills INP).
     this._updateSingleRowSelectionUI(rowId, !isSelected);
-    this.updateInfoSection();
+    this._updateInfoSection();
 
     // Trigger selection change callback with verified data
     const selectedData = Array.from(this.selectedRows)
@@ -2074,7 +2052,7 @@ class DivTable {
     this.selectedRows.clear();
     this.filteredData.forEach(item => item.selected = false);
     this.updateSelectionStates();
-    this.updateInfoSection();
+    this._updateInfoSection();
   }
 
   updateCheckboxes() {
@@ -2294,17 +2272,13 @@ class DivTable {
     }
   }
 
-  render() {
-    this.renderHeader();
-    this.renderBody();
-    this.updateInfoSection();
+  _render() {
+    this._renderHeader();
+    this._renderBody();
+    this._updateInfoSection();
     this.updateSelectionStates();
     this._scheduleTabIndexUpdate();
 
-    // Verify data consistency in development/test mode only (skip in browser production)
-    if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-      setTimeout(() => this.verifyDataConsistency(), 0);
-    }
   }
 
   /**
@@ -2325,10 +2299,10 @@ class DivTable {
     if (sortOnly && this._hasRenderedHeader) {
       this._updateSortIndicatorsInPlace();
     } else {
-      this.renderHeader();
+      this._renderHeader();
 
       if (this.fixedColumns > 0 && this._columnWidthsCache && this.scrollHeaderInner) {
-        const { scrollColumns } = this.splitColumnsForFixedLayout();
+        const { scrollColumns } = this._splitColumnsForFixedLayout();
         if (this._columnWidthsCache.length === scrollColumns.length) {
           this._applyHeaderColumnWidths(this._columnWidthsCache);
           this._headerWidthsFreshlyApplied = true;
@@ -2336,27 +2310,27 @@ class DivTable {
       }
     }
 
-    this.updateInfoSection();
+    this._updateInfoSection();
 
     if (this._renderBodyTimer) {
       cancelAnimationFrame(this._renderBodyTimer);
     }
     this._renderBodyTimer = requestAnimationFrame(() => {
       this._renderBodyTimer = null;
-      this.renderBody();
+      this._renderBody();
       this.updateSelectionStates();
       this._scheduleTabIndexUpdate();
     });
   }
 
-  renderHeader() {
+  _renderHeader() {
     // Header DOM now exists (and carries the data-sort-field markers), so a
     // subsequent sort-only render can patch its indicators in place.
     this._hasRenderedHeader = true;
 
     // Handle fixed columns layout
     if (this.fixedColumns > 0) {
-      this.renderHeaderWithFixedColumns();
+      this._renderHeaderWithFixedColumns();
       return;
     }
     
@@ -2395,8 +2369,8 @@ class DivTable {
             
             // If filter is active, re-render to show all rows
             if (this.showOnlySelected) {
-              this.renderBody();
-              this.updateInfoSection();
+              this._renderBody();
+              this._updateInfoSection();
             }
           }
         });
@@ -2414,12 +2388,12 @@ class DivTable {
       if (composite.compositeName) {
         // This is a composite cell with multiple columns
         headerCell.classList.add('composite-header');
-        this.renderCompositeHeaderCell(headerCell, composite);
+        this._renderCompositeHeaderCell(headerCell, composite);
       } else {
         // Single column
         headerCell.classList.add('sortable');
         const col = composite.columns[0];
-        this.renderSingleHeaderCell(headerCell, col);
+        this._renderSingleHeaderCell(headerCell, col);
       }
       
       this.headerContainer.appendChild(headerCell);
@@ -2429,7 +2403,7 @@ class DivTable {
     this.updateScrollbarSpacer();
   }
 
-  renderHeaderWithFixedColumns() {    // Header DOM is about to be rebuilt from scratch with default grid sizes,
+  _renderHeaderWithFixedColumns() {    // Header DOM is about to be rebuilt from scratch with default grid sizes,
     // so any previous Phase-1 width application no longer holds.
     this._headerWidthsFreshlyApplied = false;
     // Preserve scroll position before clearing
@@ -2438,7 +2412,7 @@ class DivTable {
     this.fixedHeaderContainer.innerHTML = '';
     this.scrollHeaderContainer.innerHTML = '';
     
-    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const { fixedColumns, scrollColumns } = this._splitColumnsForFixedLayout();
     
     // Build grid template for fixed section
     let fixedGridTemplate = '';
@@ -2477,8 +2451,8 @@ class DivTable {
           } else {
             this.clearSelection();
             if (this.showOnlySelected) {
-              this.renderBody();
-              this.updateInfoSection();
+              this._renderBody();
+              this._updateInfoSection();
             }
           }
         });
@@ -2490,13 +2464,13 @@ class DivTable {
     
     // Render fixed column headers
     fixedColumns.forEach(composite => {
-      const headerCell = this.createHeaderCell(composite);
+      const headerCell = this._createHeaderCell(composite);
       this.fixedHeaderContainer.appendChild(headerCell);
     });
     
     // Render scrollable column headers
     scrollColumns.forEach(composite => {
-      const headerCell = this.createHeaderCell(composite);
+      const headerCell = this._createHeaderCell(composite);
       this.scrollHeaderInner.appendChild(headerCell);
     });
     
@@ -2636,7 +2610,7 @@ class DivTable {
   syncFixedColumnsColumnWidths() {
     if (!this.fixedColumns || this.fixedColumns <= 0) return;
     if (!this.scrollHeaderInner || !this.scrollBodyContainer) return;
-    const { scrollColumns } = this.splitColumnsForFixedLayout();
+    const { scrollColumns } = this._splitColumnsForFixedLayout();
     const numColumns = scrollColumns.length;
     if (numColumns === 0) return;
 
@@ -2714,7 +2688,7 @@ class DivTable {
 
     // Apply to fixed section (if present)
     if (this.fixedColumns > 0 && this.fixedHeaderContainer && this.fixedBodyContainer) {
-      const { fixedColumns } = this.splitColumnsForFixedLayout();
+      const { fixedColumns } = this._splitColumnsForFixedLayout();
 
       // Build fixed grid using default sizes from getColumnGridSize
       let fixedGridTemplate = '';
@@ -2858,17 +2832,17 @@ class DivTable {
     }
   }
 
-  createHeaderCell(composite) {
+  _createHeaderCell(composite) {
     const headerCell = document.createElement('div');
     headerCell.className = 'div-table-header-cell';
     
     if (composite.compositeName) {
       headerCell.classList.add('composite-header');
-      this.renderCompositeHeaderCell(headerCell, composite);
+      this._renderCompositeHeaderCell(headerCell, composite);
     } else {
       headerCell.classList.add('sortable');
       const col = composite.columns[0];
-      this.renderSingleHeaderCell(headerCell, col);
+      this._renderSingleHeaderCell(headerCell, col);
     }
     
     return headerCell;
@@ -2901,7 +2875,7 @@ class DivTable {
     }
   }
 
-  renderSingleHeaderCell(headerCell, col) {
+  _renderSingleHeaderCell(headerCell, col) {
     // Check if this column has a subLabel (composite column with two-line header)
     if (col.subLabel) {
       // Create vertical stacked header for composite columns
@@ -3059,7 +3033,7 @@ class DivTable {
           });
         }
         
-        this.render();
+        this._render();
       });
       
       leftContent.appendChild(toggleAllBtn);
@@ -3142,7 +3116,7 @@ class DivTable {
     });
   }
 
-  renderCompositeHeaderCell(headerCell, composite) {
+  _renderCompositeHeaderCell(headerCell, composite) {
     // Composite header contains multiple sub-columns stacked vertically
     headerCell.style.display = 'flex';
     headerCell.style.flexDirection = 'column';
@@ -3198,7 +3172,7 @@ class DivTable {
             });
           }
           
-          this.render();
+          this._render();
         });
         
         leftContent.appendChild(toggleAllBtn);
@@ -3278,12 +3252,12 @@ class DivTable {
     });
   }
 
-  renderBody() {
+  _renderBody() {
     // Handle fixed columns layout. That path manages the lazy-render observer
     // itself, because a pure-sort reorder reuses the existing (still live)
     // row elements and must leave their observer connected.
     if (this.fixedColumns > 0) {
-      this.renderBodyWithFixedColumns();
+      this._renderBodyWithFixedColumns();
       return;
     }
 
@@ -3331,9 +3305,9 @@ class DivTable {
     }
 
     if (this.groupByField) {
-      this.renderGroupedRows(dataToRender);
+      this._renderGroupedRows(dataToRender);
     } else {
-      this.renderRegularRows(dataToRender);
+      this._renderRegularRows(dataToRender);
     }
     
     // Add header summary row if enabled and has aggregate columns
@@ -3349,7 +3323,7 @@ class DivTable {
     }
   }
 
-  renderBodyWithFixedColumns() {
+  _renderBodyWithFixedColumns() {
     // Preserve horizontal scroll position before clearing
     const scrollLeft = this.scrollBodyContainer?.scrollLeft || 0;
 
@@ -3428,8 +3402,8 @@ class DivTable {
     this._groupHeaderRegistry = new Map();
     this._headerSummaryRegistry = null;
 
-    if (!this._getKnownScrollWidths(this.splitColumnsForFixedLayout().scrollColumns) && this.scrollHeaderInner) {
-      const { scrollColumns: sc } = this.splitColumnsForFixedLayout();
+    if (!this._getKnownScrollWidths(this._splitColumnsForFixedLayout().scrollColumns) && this.scrollHeaderInner) {
+      const { scrollColumns: sc } = this._splitColumnsForFixedLayout();
       const headerCells = Array.from(this.scrollHeaderInner.querySelectorAll('.div-table-header-cell'));
       if (headerCells.length === sc.length && sc.length > 0) {
         this._columnWidthsCache = headerCells.map(cell => this._measureCellContentWidth(cell) + 4);
@@ -3502,7 +3476,7 @@ class DivTable {
       // No cache yet (initial render): measure header cells synchronously as a
       // baseline so first paint already has correct-ish column widths.
       // rAF will re-measure including row data and may widen columns further.
-      const { scrollColumns: sc } = this.splitColumnsForFixedLayout();
+      const { scrollColumns: sc } = this._splitColumnsForFixedLayout();
       const headerCells = Array.from(this.scrollHeaderInner?.querySelectorAll('.div-table-header-cell') ?? []);
       if (headerCells.length === sc.length) {
         const headerWidths = headerCells.map(cell => this._measureCellContentWidth(cell) + 4);
@@ -3526,7 +3500,7 @@ class DivTable {
     
     // Adjust fixed body padding for horizontal scrollbar (after content is rendered)
     requestAnimationFrame(() => {
-      this.adjustFixedBodyForHorizontalScrollbar();
+      this._adjustFixedBodyForHorizontalScrollbar();
     });
   }
 
@@ -3573,7 +3547,7 @@ class DivTable {
 
   /** Record the state the freshly built registry corresponds to. */
   _captureRowRegistrySnapshot() {
-    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const { fixedColumns, scrollColumns } = this._splitColumnsForFixedLayout();
     this._rowRegistrySnapshot = {
       groupByField: this.groupByField,
       showOnlySelected: this.showOnlySelected,
@@ -3598,7 +3572,7 @@ class DivTable {
     if (snap.hasSummary !== (this.showHeaderSummary && this.hasAggregateColumns())) return false;
     if (snap.collapsedKey !== [...this.collapsedGroups].sort().join(',')) return false;
 
-    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const { fixedColumns, scrollColumns } = this._splitColumnsForFixedLayout();
     if (snap.columnsSignature !== this._computeColumnsSignature(fixedColumns, scrollColumns)) return false;
 
     if (dataToRender.length !== this._rowRegistry.size) return false;
@@ -3658,7 +3632,7 @@ class DivTable {
     const scrollFragment = document.createDocumentFragment();
 
     sortedData.forEach(item => {
-      const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
+      const { fixedRow, scrollRow } = this._createRowWithFixedColumns(item);
       fixedFragment.appendChild(fixedRow);
       scrollFragment.appendChild(scrollRow);
       this._rowRegistry.set(String(item[this.primaryKeyField]), { fixedRow, scrollRow });
@@ -3680,7 +3654,7 @@ class DivTable {
       }
 
       // Group header spans both sections
-      const { fixedGroupHeader, scrollGroupHeader } = this.createGroupHeaderWithFixedColumns(group);
+      const { fixedGroupHeader, scrollGroupHeader } = this._createGroupHeaderWithFixedColumns(group);
       fixedFragment.appendChild(fixedGroupHeader);
       scrollFragment.appendChild(scrollGroupHeader);
       this._groupHeaderRegistry.set(group.key, { fixedGroupHeader, scrollGroupHeader });
@@ -3688,7 +3662,7 @@ class DivTable {
       // Group rows (if not collapsed)
       if (!this.collapsedGroups.has(group.key)) {
         group.items.forEach(item => {
-          const { fixedRow, scrollRow } = this.createRowWithFixedColumns(item);
+          const { fixedRow, scrollRow } = this._createRowWithFixedColumns(item);
           fixedFragment.appendChild(fixedRow);
           scrollFragment.appendChild(scrollRow);
           this._rowRegistry.set(String(item[this.primaryKeyField]), { fixedRow, scrollRow });
@@ -3714,7 +3688,7 @@ class DivTable {
     if (typeof IntersectionObserver === 'undefined') {
       // Fallback: populate all rows immediately
       console.warn('DivTable: IntersectionObserver not supported, falling back to eager rendering');
-      this.populateAllUnpopulatedRows();
+      this._populateAllUnpopulatedRows();
       return;
     }
     
@@ -3751,10 +3725,10 @@ class DivTable {
                 }
                 
                 if (fixedRow && scrollRow) {
-                  this.populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
+                  this._populateRowCellsWithFixedColumns(fixedRow, scrollRow, item);
                 }
               } else {
-                this.populateRowCells(row, item);
+                this._populateRowCells(row, item);
               }
             }
           }
@@ -3804,9 +3778,9 @@ class DivTable {
       if (!item) continue;
       if (this.fixedColumns > 0) {
         const fixedRow = row._peer || this.fixedBodyContainer.querySelector(`.div-table-row[data-id="${rowId}"]`);
-        if (fixedRow) this.populateRowCellsWithFixedColumns(fixedRow, row, item);
+        if (fixedRow) this._populateRowCellsWithFixedColumns(fixedRow, row, item);
       } else {
-        this.populateRowCells(row, item);
+        this._populateRowCells(row, item);
       }
     }
   }
@@ -3814,7 +3788,7 @@ class DivTable {
   /**
    * Fallback method to populate all unpopulated rows (when IntersectionObserver not available)
    */
-  populateAllUnpopulatedRows() {
+  _populateAllUnpopulatedRows() {
     const bodyContainer = this.fixedColumns > 0 ? this.scrollBodyContainer : this.bodyContainer;
     const rows = bodyContainer.querySelectorAll('.div-table-row[data-populated="false"]');
     
@@ -3822,24 +3796,24 @@ class DivTable {
       const rowId = row.dataset.id;
       const item = this.findRowData(rowId);
       if (item) {
-        this.populateRowCells(row, item);
+        this._populateRowCells(row, item);
       }
     });
   }
 
-  renderRegularRows(dataToRender = this.filteredData) {
+  _renderRegularRows(dataToRender = this.filteredData) {
     const sortedData = this.sortData(dataToRender);
     const fragment = document.createDocumentFragment();
     
     sortedData.forEach(item => {
-      const row = this.createRow(item);
+      const row = this._createRow(item);
       fragment.appendChild(row);
     });
     
     this.bodyContainer.appendChild(fragment);
   }
 
-  renderGroupedRows(dataToRender = this.filteredData) {
+  _renderGroupedRows(dataToRender = this.filteredData) {
     const groups = this._sortGroupsByField(this.groupData(dataToRender));
 
     const fragment = document.createDocumentFragment();
@@ -3851,13 +3825,13 @@ class DivTable {
       }
       
       // Group header
-      const groupHeader = this.createGroupHeader(group);
+      const groupHeader = this._createGroupHeader(group);
       fragment.appendChild(groupHeader);
       
       // Group rows (if not collapsed)
       if (!this.collapsedGroups.has(group.key)) {
         group.items.forEach(item => {
-          const row = this.createRow(item);
+          const row = this._createRow(item);
           fragment.appendChild(row);
         });
       }
@@ -3871,7 +3845,7 @@ class DivTable {
    * @param {HTMLElement} row - The row element to populate
    * @param {Object} item - The data item for this row
    */
-  populateRowCells(row, item) {
+  _populateRowCells(row, item) {
     // Skip if already populated
     if (row.dataset.populated === 'true') return;
     
@@ -3891,7 +3865,7 @@ class DivTable {
 
     // Data columns - render using composite structure with proper alignment
     compositeColumns.forEach(composite => {
-      const cell = this.createCellForComposite(composite, item);
+      const cell = this._createCellForComposite(composite, item);
       row.appendChild(cell);
     });
 
@@ -3908,11 +3882,11 @@ class DivTable {
    * @param {HTMLElement} scrollRow - The scroll row element  
    * @param {Object} item - The data item for this row
    */
-  populateRowCellsWithFixedColumns(fixedRow, scrollRow, item) {
+  _populateRowCellsWithFixedColumns(fixedRow, scrollRow, item) {
     // Skip if already populated
     if (fixedRow.dataset.populated === 'true') return;
     
-    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const { fixedColumns, scrollColumns } = this._splitColumnsForFixedLayout();
     const rowId = String(item[this.primaryKeyField]);
     
     // Checkbox column (in fixed row only)
@@ -3928,13 +3902,13 @@ class DivTable {
     
     // Render fixed columns
     fixedColumns.forEach(composite => {
-      const cell = this.createCellForComposite(composite, item);
+      const cell = this._createCellForComposite(composite, item);
       fixedRow.appendChild(cell);
     });
     
     // Render scrollable columns
     scrollColumns.forEach(composite => {
-      const cell = this.createCellForComposite(composite, item);
+      const cell = this._createCellForComposite(composite, item);
       scrollRow.appendChild(cell);
     });
     
@@ -4001,7 +3975,7 @@ class DivTable {
     this._cachedGridTemplate = gridTemplate.trim();
   }
 
-  createRow(item) {
+  _createRow(item) {
     const row = document.createElement('div');
     row.className = 'div-table-row';
     row.dataset.id = item[this.primaryKeyField];
@@ -4047,17 +4021,17 @@ class DivTable {
 
     // Data columns - render using composite structure with proper alignment
     compositeColumns.forEach(composite => {
-      const cell = this.createCellForComposite(composite, item);
+      const cell = this._createCellForComposite(composite, item);
       row.appendChild(cell);
     });
 
     return row;
   }
 
-  createRowWithFixedColumns(item) {
+  _createRowWithFixedColumns(item) {
     // Use cached grid templates — build them once per render cycle, not once per row
     if (!this._cachedFixedRowGridTemplate) {
-      const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+      const { fixedColumns, scrollColumns } = this._splitColumnsForFixedLayout();
       this._cachedFixedColumns = fixedColumns;
       this._cachedScrollColumns = scrollColumns;
       let fixedTemplate = this.showCheckboxes ? '40px ' : '';
@@ -4120,13 +4094,13 @@ class DivTable {
     
     // Render fixed columns
     fixedColumns.forEach(composite => {
-      const cell = this.createCellForComposite(composite, item);
+      const cell = this._createCellForComposite(composite, item);
       fixedRow.appendChild(cell);
     });
     
     // Render scrollable columns
     scrollColumns.forEach(composite => {
-      const cell = this.createCellForComposite(composite, item);
+      const cell = this._createCellForComposite(composite, item);
       scrollRow.appendChild(cell);
     });
 
@@ -4136,7 +4110,7 @@ class DivTable {
     return { fixedRow, scrollRow };
   }
 
-  updateFocusStateForFixedRows(fixedRow, scrollRow) {
+  _updateFocusStateForFixedRows(fixedRow, scrollRow) {
     // Clear previous focus classes in both containers
     this.fixedBodyContainer.querySelectorAll('.div-table-row.focused').forEach(r => r.classList.remove('focused'));
     this.scrollBodyContainer.querySelectorAll('.div-table-row.focused').forEach(r => r.classList.remove('focused'));
@@ -4158,7 +4132,7 @@ class DivTable {
     }
   }
 
-  createCellForComposite(composite, item) {
+  _createCellForComposite(composite, item) {
     const cell = document.createElement('div');
     cell.className = 'div-table-cell';
 
@@ -4250,8 +4224,8 @@ class DivTable {
     return cell;
   }
 
-  createGroupHeaderWithFixedColumns(group) {
-    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+  _createGroupHeaderWithFixedColumns(group) {
+    const { fixedColumns, scrollColumns } = this._splitColumnsForFixedLayout();
     
     // Create fixed group header part
     const fixedGroupHeader = document.createElement('div');
@@ -4319,8 +4293,8 @@ class DivTable {
         });
         
         if (this.showOnlySelected) {
-          this.renderBody();
-          this.updateInfoSection();
+          this._renderBody();
+          this._updateInfoSection();
           
           if (typeof this.onSelectionChange === 'function') {
             this.onSelectionChange(this._getSelectedRowData());
@@ -4329,7 +4303,7 @@ class DivTable {
         }
         
         this.updateSelectionStates();
-        this.updateInfoSection();
+        this._updateInfoSection();
         
         if (typeof this.onSelectionChange === 'function') {
           this.onSelectionChange(this._getSelectedRowData());
@@ -4337,7 +4311,7 @@ class DivTable {
       });
       
       checkbox.addEventListener('focus', (e) => {
-        this.updateFocusStateForFixedRows(fixedGroupHeader, scrollGroupHeader);
+        this._updateFocusStateForFixedRows(fixedGroupHeader, scrollGroupHeader);
       });
       
       checkboxCell.appendChild(checkbox);
@@ -4495,7 +4469,7 @@ class DivTable {
       }
       // Re-measure column widths since group visibility changed
       this._columnWidthsDirty = true;
-      this.render();
+      this._render();
     };
     
     toggleBtn.addEventListener('click', handleToggleClick);
@@ -4517,7 +4491,7 @@ class DivTable {
     return { fixedGroupHeader, scrollGroupHeader };
   }
 
-  createGroupHeader(group) {
+  _createGroupHeader(group) {
     const groupRow = document.createElement('div');
     groupRow.className = 'div-table-row group-header';
     groupRow.dataset.groupKey = group.key; // Store group key for identification
@@ -4589,8 +4563,8 @@ class DivTable {
         
         // If filter is active, always re-render to update the filtered view
         if (this.showOnlySelected) {
-          this.renderBody();
-          this.updateInfoSection();
+          this._renderBody();
+          this._updateInfoSection();
           
           // Trigger selection change callback
           if (typeof this.onSelectionChange === 'function') {
@@ -4601,7 +4575,7 @@ class DivTable {
         
         // Update visual states for all rows
         this.updateSelectionStates();
-        this.updateInfoSection();
+        this._updateInfoSection();
         
         // Trigger selection change callback
         if (typeof this.onSelectionChange === 'function') {
@@ -4771,7 +4745,7 @@ class DivTable {
       }
       // Re-measure column widths since group visibility changed
       this._columnWidthsDirty = true;
-      this.render();
+      this._render();
       
       // After render, restore focus
       setTimeout(() => {
@@ -4954,19 +4928,19 @@ class DivTable {
       item.selected = true;
     });
     this.updateSelectionStates();
-    this.updateInfoSection();
+    this._updateInfoSection();
     if (typeof this.onSelectionChange === 'function') {
       this.onSelectionChange(this._getSelectedRowData());
     }
   }
 
-  updateInfoSection() {
+  _updateInfoSection() {
     if (!this.infoSection) return;
     
     // For virtual scrolling, use the max of totalRecords and actual loaded data
     // This handles cases where loaded data exceeds the reported total
-    const total = this.virtualScrolling 
-      ? Math.max(this.totalRecords, this.data.length) 
+    const total = this.virtualScrolling
+      ? this._getComparableTotalRecords()
       : this.data.length;
     const loaded = this.data.length;
     const filtered = this.filteredData.length;
@@ -5000,7 +4974,7 @@ class DivTable {
     
     // Add auto-fetch button if enabled (only for virtual scrolling tables with more data to fetch)
     if (this.showAutoFetchButton && this.virtualScrolling && (this.hasMoreData || this.isAutoFetching)) {
-      const autoFetchButton = this.createAutoFetchButton();
+      const autoFetchButton = this._createAutoFetchButton();
       
       // Button is always enabled if shown (either actively fetching or ready to fetch more)
       autoFetchButton.disabled = false;
@@ -5010,7 +4984,7 @@ class DivTable {
     
     // Add refresh button if enabled - always in the first line container
     if (this.showRefreshButton) {
-      const refreshButton = this.createRefreshButton();
+      const refreshButton = this._createRefreshButton();
       
       // Show loading state on refresh button for ANY loading operation
       // This provides consistent UI and visual feedback
@@ -5076,16 +5050,16 @@ class DivTable {
     this.infoSection.appendChild(statsLine);
     
     // Third line: Visual progress bar
-    this.createProgressBar(loaded, total, filtered);
+    this._createProgressBar(loaded, total, filtered);
   }
 
-  createProgressBar(loaded, total, filtered) {
+  _createProgressBar(loaded, total, filtered) {
     const progressLine = document.createElement('div');
     progressLine.className = 'progress-line';
     
     // Always use current totalRecords for accurate calculations
     // This ensures correct shimmer size even when totalRecords changes during loading
-    const currentTotal = this.virtualScrolling ? this.totalRecords : this.data.length;
+    const currentTotal = this.virtualScrolling ? this._getComparableTotalRecords() : this.data.length;
     
     // Show progress bar only when not all data is loaded yet (hide when fully loaded)
     const showLoadingProgress = this.virtualScrolling && loaded < currentTotal;
@@ -5172,7 +5146,7 @@ class DivTable {
     }
   }
 
-  createRefreshButton() {
+  _createRefreshButton() {
     // Create refresh button container
     const refreshButton = document.createElement('button');
     refreshButton.className = 'refresh-button';
@@ -5212,7 +5186,7 @@ class DivTable {
     return refreshButton;
   }
 
-  createAutoFetchButton() {
+  _createAutoFetchButton() {
     // Create auto-fetch button container
     const autoFetchButton = document.createElement('button');
     autoFetchButton.className = 'auto-fetch-button';
@@ -5329,7 +5303,7 @@ class DivTable {
       if (this.updateAutoFetchButtonIcon) {
         this.updateAutoFetchButtonIcon(true); // isPaused = true
       }
-      this.updateInfoSection();
+      this._updateInfoSection();
     }
   }
 
@@ -5349,7 +5323,7 @@ class DivTable {
       this.autoFetchButton?.classList.remove('active', 'paused');
     }
     
-    this.updateInfoSection();
+    this._updateInfoSection();
   }
 
   /**
@@ -5396,7 +5370,7 @@ class DivTable {
       updateButtonState();
       
       // Re-render the table with the new filter
-      this.render();
+      this._render();
       
       console.log(this.showOnlySelected ? '👁️ Showing only selected rows' : '👁️ Showing all rows');
     });
@@ -5408,7 +5382,7 @@ class DivTable {
     if (!this.infoSection || !this.virtualScrolling) return;
     
     // Use max of totalRecords and actual loaded data to handle inconsistencies
-    const total = Math.max(this.totalRecords, this.data.length);
+    const total = this._getComparableTotalRecords();
     const currentLoaded = this.data.length;
     const filtered = this.filteredData.length;
     // Count only valid selected rows (detail records, not stale IDs)
@@ -5439,7 +5413,7 @@ class DivTable {
     
     // Add auto-fetch button if enabled (only for virtual scrolling tables with more data to fetch)
     if (this.showAutoFetchButton && this.virtualScrolling && (this.hasMoreData || this.isAutoFetching)) {
-      const autoFetchButton = this.createAutoFetchButton();
+      const autoFetchButton = this._createAutoFetchButton();
       
       // Disable button if paused (waiting for current page to complete)
       autoFetchButton.disabled = this.autoFetchPaused;
@@ -5449,7 +5423,7 @@ class DivTable {
     
     // Add refresh button if enabled - show loading state during anticipated progress
     if (this.showRefreshButton) {
-      const refreshButton = this.createRefreshButton();
+      const refreshButton = this._createRefreshButton();
       
       // During anticipated progress, we're loading, so show spinning state
       refreshButton.classList.add('refreshing');
@@ -5495,13 +5469,13 @@ class DivTable {
     this.infoSection.appendChild(statsLine);
     
     // Third line: Visual progress bar with anticipated progress using existing createProgressBar
-    this.createProgressBar(anticipatedLoaded, total, filtered);
+    this._createProgressBar(anticipatedLoaded, total, filtered);
   }
 
   // Public API methods
   /**
    * Apply query filter to update filteredData without triggering a render or
-   * other side effects. Use internally when the caller will call render() itself.
+  * other side effects. Use internally when the caller will call _render() itself.
    */
   _filterData(query) {
     if (!query || !query.trim()) {
@@ -5748,7 +5722,7 @@ class DivTable {
     this.showOnlySelected = showOnlySelected !== undefined ? showOnlySelected : !this.showOnlySelected;
     
     // Re-render the table with the new filter
-    this.render();
+    this._render();
     
     console.log(this.showOnlySelected ? '👁️ Showing only selected rows' : '👁️ Showing all rows');
     
@@ -5768,7 +5742,7 @@ class DivTable {
     
     try {
       // If this is a virtual scrolling table, reset and load first page
-      if (this.virtualScrolling && typeof this.onNextPage === 'function') {
+      if (this._usesPagination() && typeof this.onNextPage === 'function') {
         
         // Preserve current filter/query and selections before resetting
         const preservedQuery = this.currentQuery;
@@ -5785,13 +5759,14 @@ class DivTable {
         this.currentPage = 0;
         this.isLoading = true; // Set loading state before fetching
         this.hasMoreData = true;
+        this._syncTotalRecords();
         
         
         // Update the query engine with empty data
         this.queryEngine.setObjects([]);
         
         // Re-render to show loading state
-        this.render();
+        this._render();
         
         const firstPageToLoad = 0; // Start with page 0
         const firstPageData = await this.onNextPage(firstPageToLoad, this.pageSize);
@@ -5813,11 +5788,13 @@ class DivTable {
           }
           
           // Re-render to update UI with restored selections
-          this.render();
+          this._render();
         } else {
           // No data received, clear loading state
           this.isLoadingState = false;
-          this.render();
+          this._syncTotalRecords();
+          this.hasMoreData = false;
+          this._render();
         }
       } else {
         // For non-virtual scrolling tables, call the onRefresh callback if provided
@@ -5825,7 +5802,7 @@ class DivTable {
           // Set loading state if showLoadingPlaceholder is enabled
           if (this.showLoadingPlaceholder) {
             this.isLoadingState = true;
-            this.render(); // Show loading placeholder immediately
+            this._render(); // Show loading placeholder immediately
           }
           
           await Promise.resolve(this.onRefresh());
@@ -5834,7 +5811,7 @@ class DivTable {
           // (unless replaceData was called which already clears it)
           if (this.isLoadingState) {
             this.isLoadingState = false;
-            this.render();
+            this._render();
           }
         } else {
           console.log('ℹ️ Refresh: No onRefresh callback provided for non-virtual scrolling table');
@@ -5844,7 +5821,7 @@ class DivTable {
       console.error('❌ Refresh error:', error);
       // Clear loading state on error
       this.isLoadingState = false;
-      this.render();
+      this._render();
       throw error; // Re-throw so caller can handle the error
     }
   }
@@ -5945,61 +5922,6 @@ class DivTable {
     this._setupQueryListeners();
   }
 
-  // Debug method to verify data consistency
-  verifyDataConsistency() {
-    const issues = [];
-    
-    // Check if all selectedRows exist in the data
-    for (const selectedId of this.selectedRows) {
-      const rowData = this.findRowData(selectedId);
-      if (!rowData) {
-        issues.push(`Selected row ${selectedId} not found in data`);
-      }
-    }
-    
-    // Check if all displayed rows have corresponding data
-    const displayedRowIds = Array.from(this.bodyContainer.querySelectorAll('.div-table-row[data-id]'))
-      .map(row => row.dataset.id);
-    
-    for (const displayedId of displayedRowIds) {
-      const rowData = this.findRowData(displayedId);
-      if (!rowData) {
-        issues.push(`Displayed row ${displayedId} not found in data`);
-      }
-    }
-    
-    if (issues.length > 0) {
-      console.warn('DivTable data consistency issues:', issues);
-    }
-    
-    return issues.length === 0;
-  }
-
-  // Test method to verify group selection states
-  testGroupSelectionStates() {
-    if (!this.groupByField) {
-      console.log('No grouping applied');
-      return;
-    }
-
-    const groups = this.groupData(this.sortData(this.filteredData));
-    console.log('Group selection states:');
-    
-    groups.forEach(group => {
-      const groupItemIds = group.items.map(item => String(item[this.primaryKeyField]));
-      const selectedInGroup = groupItemIds.filter(id => this.selectedRows.has(id));
-      
-      let state = 'none';
-      if (selectedInGroup.length === groupItemIds.length) {
-        state = 'all';
-      } else if (selectedInGroup.length > 0) {
-        state = 'partial';
-      }
-      
-      console.log(`Group "${group.value}": ${selectedInGroup.length}/${groupItemIds.length} selected (${state})`);
-    });
-  }
-
   // Virtual Scrolling Methods
   handleVirtualScroll() {
     const scrollTop = this.bodyContainer.scrollTop;
@@ -6023,7 +5945,7 @@ class DivTable {
   }
 
   async loadNextPage() {
-    if (this.isLoading || !this.hasMoreData) {
+    if (!this._usesPagination() || this.isLoading || !this.hasMoreData) {
       return;
     }
     
@@ -6051,19 +5973,7 @@ class DivTable {
           this.currentPage = nextPageToLoad;
         }
         
-        // Check if we have more data - improved logic to determine if current page is the last page
-        if (this.totalRecords && this.totalRecords > 0) {
-          // If we know the total number of records, check if we've loaded them all
-          this.hasMoreData = this.data.length < this.totalRecords;
-        } else {
-          // Fallback to standard pagination logic: if we got less data than requested page size, we're at the end
-          this.hasMoreData = newData.length === this.pageSize;
-        }
-        
-        // Additional check: if we got fewer records than the page size, we're definitely at the end
-        if (newData.length < this.pageSize) {
-          this.hasMoreData = false;
-        }
+        this.hasMoreData = this._calculateHasMoreData(newData.length);
       } else {
         // No more data available
         this.hasMoreData = false;
@@ -6075,7 +5985,7 @@ class DivTable {
       this.showErrorIndicator();
     } finally {
       // Step 5: Always update infoSection to reflect final state (success or error)
-      this.updateInfoSection();
+      this._updateInfoSection();
     }
   }
 
@@ -6203,79 +6113,14 @@ class DivTable {
       return;
     }
     
-    this.totalRecords = total;
-    this.hasMoreData = this.data.length < total;
+    this._configuredTotalRecords = total;
+    this._syncTotalRecords();
+    this.hasMoreData = this._calculateHasMoreData();
     
     // Update info section to reflect new total
-    this.updateInfoSection();
+    this._updateInfoSection();
     
     console.log(`DivTable: Updated totalRecords to ${total}, hasMoreData: ${this.hasMoreData}`);
-  }
-
-  setPageSize(newPageSize) {
-    if (typeof newPageSize !== 'number' || newPageSize <= 0) {
-      console.warn('DivTable: pageSize must be a positive number');
-      return;
-    }
-    
-    const oldPageSize = this.pageSize;
-    this.pageSize = newPageSize;
-    
-    // Recalculate loading threshold based on new page size
-    this.loadingThreshold = Math.floor(this.pageSize * 0.8);
-    
-    // Update visible end index for virtual scrolling
-    this.visibleEndIndex = Math.min(this.visibleStartIndex + this.pageSize, this.data.length);
-    
-    // Update info section to reflect new configuration
-    this.updateInfoSection();
-    
-    console.log(`DivTable: Updated pageSize from ${oldPageSize} to ${newPageSize}, loadingThreshold: ${this.loadingThreshold}`);
-  }
-
-  setVirtualScrollingConfig({ totalRecords, pageSize, loadingThreshold }) {
-    let updated = false;
-    
-    if (typeof totalRecords === 'number' && totalRecords >= 0) {
-      this.totalRecords = totalRecords;
-      this.hasMoreData = this.data.length < totalRecords;
-      updated = true;
-    }
-    
-    if (typeof pageSize === 'number' && pageSize > 0) {
-      this.pageSize = pageSize;
-      this.visibleEndIndex = Math.min(this.visibleStartIndex + this.pageSize, this.data.length);
-      updated = true;
-    }
-    
-    if (typeof loadingThreshold === 'number' && loadingThreshold > 0) {
-      this.loadingThreshold = loadingThreshold;
-      updated = true;
-    } else if (typeof pageSize === 'number') {
-      // Recalculate loading threshold if pageSize changed but threshold wasn't provided
-      this.loadingThreshold = Math.floor(this.pageSize * 0.8);
-      updated = true;
-    }
-    
-    if (updated) {
-      this.updateInfoSection();
-      console.log(`DivTable: Updated virtual scrolling config - totalRecords: ${this.totalRecords}, pageSize: ${this.pageSize}, loadingThreshold: ${this.loadingThreshold}`);
-    }
-  }
-
-  setHasMoreData(hasMore) {
-    this.hasMoreData = hasMore;
-  }
-
-  resetPagination() {
-    this.currentPage = 0;
-    this.isLoading = false;
-    this.hasMoreData = true;
-    this.data = this.data.slice(0, this.pageSize); // Keep only first page
-    this._buildDataMap();
-    this.filteredData = [...this.data];
-    this.hideErrorIndicator();
-    this.render();
   }
 
   appendData(newData, skipInfoUpdate = false) {
@@ -6341,18 +6186,20 @@ class DivTable {
       // Update the query engine with new/updated data
       this.queryEngine.setObjects(this.data);
       this._buildDataMap();
+      this._syncTotalRecords('append');
+      this.hasMoreData = this._calculateHasMoreData();
       
       // Update query editor if field values changed (for completion suggestions)
       this.updateQueryEditorIfNeeded();
       
-      // Re-filter data without triggering a render — render() below is the single render pass
+      // Re-filter data without triggering a render — _render() below is the single render pass
       this._filterData(this.currentQuery);
       
-      // Single render pass (render() calls updateInfoSection() internally)
+      // Single render pass (_render() calls _updateInfoSection() internally)
       if (!skipInfoUpdate) {
-        this.updateInfoSection();
+        this._updateInfoSection();
       }
-      this.render();
+      this._render();
       
       // Reconcile row focus: re-focus if row was updated, or keep as-is
       this.reconcileFocusAfterDataChange();
@@ -6405,6 +6252,7 @@ class DivTable {
     this._buildDataMap();
     this.isLoadingState = false;
     this.clearRefreshButtonLoadingState();
+    this._syncTotalRecords();
 
     // Completely new data — column widths must be re-measured
     this._columnWidthsDirty = true;
@@ -6414,7 +6262,7 @@ class DivTable {
     this.updateQueryEditorIfNeeded();
     
     // Filter without rendering — all state resets below must be applied before the
-    // single render() call at the end. Using _filterData avoids the extra render
+    // single _render() call at the end. Using _filterData avoids the extra render
     // that applyQuery() would trigger mid-way through the state setup.
     this._filterData(this.currentQuery);
     
@@ -6423,7 +6271,7 @@ class DivTable {
     this.virtualScrollingState = {
       scrollTop: 0,
       displayStartIndex: 0,
-      displayEndIndex: Math.min(this.pageSize, this.data.length),
+      displayEndIndex: this.pageSize > 0 ? Math.min(this.pageSize, this.data.length) : this.data.length,
       isLoading: false,
     };
     
@@ -6431,14 +6279,11 @@ class DivTable {
     this.currentPage = 0;
     this.startId = 1;
     
-    // Update hasMoreData flag based on whether we have less data than totalRecords
-    if (this.virtualScrolling && this.totalRecords) {
-      this.hasMoreData = validRecords.length < this.totalRecords;
-    }
+    this.hasMoreData = this._calculateHasMoreData(validRecords.length);
     
     // Single render pass
-    this.updateInfoSection();
-    this.render();
+    this._updateInfoSection();
+    this._render();
     
     // Reconcile row focus: if a row was focused before replaceData,
     // re-focus it if it still exists, or clear focus if it's gone
@@ -6461,6 +6306,8 @@ class DivTable {
     this.filteredData = [];
     this.selectedRows.clear();
     this.currentQuery = '';
+    this._syncTotalRecords();
+    this.hasMoreData = this._calculateHasMoreData(0);
     
     // Update Monaco editor if it exists
     if (this.queryEditor?.editor) {
@@ -6471,12 +6318,12 @@ class DivTable {
     this.queryEngine.setObjects([]);
     
     // Re-render to show loading placeholder
-    this.render();
+    this._render();
   }
 
   setLoadingState(isLoading) {
     this.isLoadingState = Boolean(isLoading);
-    this.render(); // Re-render to show/hide loading placeholder
+    this._render(); // Re-render to show/hide loading placeholder
   }
 
   // =====================================
@@ -6686,7 +6533,7 @@ class DivTable {
    * @returns {Object} Object with fixedSummary and scrollSummary elements
    */
   createHeaderSummaryRowWithFixedColumns(dataToRender) {
-    const { fixedColumns, scrollColumns } = this.splitColumnsForFixedLayout();
+    const { fixedColumns, scrollColumns } = this._splitColumnsForFixedLayout();
     const aggregationData = this.getAggregationDataSet(dataToRender);
     
     // Fixed section summary row

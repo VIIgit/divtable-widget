@@ -266,7 +266,7 @@ describe('DivTable Integration Tests', () => {
       expect(document.activeElement).toBe(firstCheckbox);
 
       const preventDefault = jest.fn();
-      divTable.handleKeyDown({
+      divTable._handleKeyDown({
         ctrlKey: true,
         metaKey: false,
         key: 'c',
@@ -300,7 +300,7 @@ describe('DivTable Integration Tests', () => {
       divTable.hideCopyChooser();
 
       const preventDefault = jest.fn();
-      divTable.handleKeyDown({
+      divTable._handleKeyDown({
         ctrlKey: true,
         metaKey: false,
         key: 'c',
@@ -320,7 +320,7 @@ describe('DivTable Integration Tests', () => {
       divTable.updateFocusState(row);
 
       const preventDefault = jest.fn();
-      divTable.handleKeyDown({
+      divTable._handleKeyDown({
         ctrlKey: true,
         metaKey: false,
         key: 'c',
@@ -342,7 +342,7 @@ describe('DivTable Integration Tests', () => {
       divTable.updateFocusState(row);
 
       const preventDefault = jest.fn();
-      divTable.handleKeyDown({
+      divTable._handleKeyDown({
         ctrlKey: true,
         metaKey: false,
         key: 'c',

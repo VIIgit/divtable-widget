@@ -299,7 +299,7 @@ describe('DivTable', () => {
     it('should show the chooser on first Ctrl/Cmd+C instead of copying immediately', () => {
       const preventDefault = jest.fn();
 
-      divTable.handleKeyDown({
+      divTable._handleKeyDown({
         ctrlKey: true,
         metaKey: false,
         key: 'c',
@@ -610,7 +610,8 @@ describe('DivTable', () => {
 
       const divTable = new DivTable(mockMonaco, options);
 
-      expect(divTable.totalRecords).toBe(500); // 10x page size
+      expect(divTable.totalRecords).toBeNull();
+      expect(divTable.hasMoreData).toBe(true);
     });
 
     it('should use data length when no virtual scrolling', () => {
@@ -624,6 +625,58 @@ describe('DivTable', () => {
       const divTable = new DivTable(mockMonaco, options);
 
       expect(divTable.totalRecords).toBe(testData.length);
+    });
+
+    it('should not track totalRecords when pageSize is 0', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: testData,
+        virtualScrolling: true,
+        pageSize: 0,
+        totalRecords: 500
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+
+      expect(divTable.pageSize).toBe(0);
+      expect(divTable.totalRecords).toBeNull();
+      expect(divTable.hasMoreData).toBe(false);
+    });
+  });
+
+  describe('total records synchronization', () => {
+    it('should preserve known totals when replacing paginated data', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: [],
+        virtualScrolling: true,
+        pageSize: 2,
+        totalRecords: 10
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      divTable.replaceData(testData.slice(0, 2));
+
+      expect(divTable.totalRecords).toBe(10);
+      expect(divTable.hasMoreData).toBe(true);
+    });
+
+    it('should reset unknown totals when replacing paginated data', () => {
+      const options = {
+        tableWidgetElement: container,
+        columns: testColumns,
+        data: [],
+        virtualScrolling: true,
+        pageSize: 2
+      };
+
+      const divTable = new DivTable(mockMonaco, options);
+      divTable.replaceData(testData.slice(0, 2));
+
+      expect(divTable.totalRecords).toBeNull();
+      expect(divTable.hasMoreData).toBe(true);
     });
   });
 
@@ -843,7 +896,7 @@ describe('DivTable', () => {
       
       // Expand all groups to see group summaries
       divTable.collapsedGroups.clear();
-      divTable.render();
+      divTable._render();
 
       const groupHeaders = container.querySelectorAll('.group-header');
       // Should have 3 group headers (NYC, LA, Chicago) with inline summary cells
